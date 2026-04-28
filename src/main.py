@@ -73,7 +73,8 @@ def cmd_init(args) -> None:
     markdown = render_full_canvas(date, games, summaries)
 
     slack = SlackCanvasClient()
-    title = "오늘의 KBO :baseball:"
+    # Canvas title은 plain text라 emoji shortcode가 변환되지 않음 → unicode 직접 삽입
+    title = "오늘의 KBO ⚾"
     canvas_id = slack.create_canvas(title, markdown, channel_id=args.channel)
     print(f"CANVAS_ID={canvas_id}")
     print("→ 이 값을 GitHub Secrets의 SLACK_CANVAS_ID에 저장하세요.")

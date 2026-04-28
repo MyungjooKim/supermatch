@@ -23,7 +23,9 @@ WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "
 TEAM_EMOJI = {
     "LG": ":baseball:",
     "SS": ":lion_face:",
-    "LT": ":seagull:",  # 사직 갈매기
+    # `:seagull:`은 Slack 기본 emoji가 아니어서 텍스트로 노출됨.
+    # 워크스페이스에 custom `:seagull:`을 업로드하면 그걸로 바꿔도 됨.
+    "LT": ":bird:",
     "OB": ":bear:",
     "WO": ":eagle:",
     "SK": ":ship:",
@@ -34,17 +36,17 @@ TEAM_EMOJI = {
 }
 
 # 섹션 앵커 — canvases.sections.lookup이 이 텍스트로 섹션을 찾습니다.
-# (replace operation은 section_id 기준이라, 매번 lookup → replace 흐름)
-ANCHOR_HEADER = "<!-- kbo:header -->"
-ANCHOR_TEAMS = "<!-- kbo:teams -->"
-ANCHOR_SCHEDULE = "<!-- kbo:schedule -->"
-ANCHOR_FOOTER = "<!-- kbo:footer -->"
+# Slack Canvas markdown은 HTML 주석을 그대로 텍스트로 렌더링하므로,
+# 보이는 헤딩 텍스트 자체를 anchor로 사용합니다.
+ANCHOR_HEADER = "오늘의 KBO"
+ANCHOR_TEAMS = "우리 팀 오늘"
+ANCHOR_SCHEDULE = "오늘의 전체 일정"
+ANCHOR_FOOTER = "데이터: Naver 스포츠"
 
 
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
     return (
-        f"{ANCHOR_HEADER}\n"
         f"# :baseball: 오늘의 KBO\n"
         f"### {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
     )
@@ -103,7 +105,7 @@ def render_team_section(
     summaries: dict[str, str],
 ) -> str:
     """LG / 삼성 / 롯데 카드 묶음."""
-    parts = [ANCHOR_TEAMS, "## :star: 우리 팀 오늘"]
+    parts = ["## :star: 우리 팀 오늘"]
     order = ["LG", "SS", "LT"]
     for code in order:
         team_game = next((g for g in games if g.involves(code)), None)
@@ -113,7 +115,7 @@ def render_team_section(
 
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
     """오늘의 KBO 전체 경기 일정 테이블."""
-    parts = [ANCHOR_SCHEDULE, "## :clipboard: 오늘의 전체 일정"]
+    parts = ["## :clipboard: 오늘의 전체 일정"]
 
     if is_monday(date) and not games:
         parts.append(
@@ -154,7 +156,6 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
 def render_footer() -> str:
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     return (
-        f"{ANCHOR_FOOTER}\n"
         f"---\n"
         f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_\n"
     )
