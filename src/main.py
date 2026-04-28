@@ -114,7 +114,7 @@ def cmd_update(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="KBO daily Canvas updater")
+    parser = argparse.ArgumentParser(description="Supermatch - KBO daily Canvas updater")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_init = sub.add_parser("init", help="최초 Canvas 생성")
