@@ -1,4 +1,4 @@
-# KBO Daily Canvas
+# Supermatch
 
 매일 KBO 경기 일정과 응원팀(LG/삼성/롯데) 결과 요약을 Slack Canvas에 자동 업데이트합니다.
 
