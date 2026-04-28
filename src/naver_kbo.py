@@ -7,6 +7,12 @@ Naver의 비공식 내부 API를 사용합니다.
 - /game/{gameId}/record  : 박스스코어 (이닝 점수, 투수/타자 기록)
 
 비공식 API라 언제든 스펙이 바뀔 수 있으니 응답 검증을 꼼꼼히 합니다.
+
+응답 필드 메모 (실측):
+- gameDateTime: "2026-04-28T18:30:00" (ISO-8601, T 구분자)
+- statusCode: "READY" / "STARTED" / "RESULT" / "CANCEL"
+- reversedHomeAway: true 면 home/away 필드가 표시 우선순위로 뒤집혀 있음
+- stadium은 별도 필드명을 쓰거나 응답에서 빠질 수 있음
 """
 
 from __future__ import annotations
@@ -41,6 +47,33 @@ TEAM_NAME = {
     "HH": "한화 이글스",
     "NC": "NC 다이노스",
     "KT": "KT 위즈",
+}
+
+# 팀 코드 → 홈구장 (KBO는 1팀 1홈구장 원칙. 잠실은 LG/두산 공동홈)
+HOME_STADIUM = {
+    "LG": "잠실",
+    "OB": "잠실",      # 두산
+    "WO": "고척",      # 키움
+    "SK": "인천",      # SSG (랜더스필드)
+    "LT": "사직",      # 롯데
+    "SS": "대구",      # 삼성 (라이온즈파크)
+    "HT": "광주",      # KIA (챔피언스필드)
+    "HH": "대전",      # 한화 (이글스파크)
+    "NC": "창원",      # NC (NC파크)
+    "KT": "수원",      # KT (위즈파크)
+}
+
+# Naver의 statusCode → 우리 내부 상태 매핑
+STATUS_MAP = {
+    "READY": "BEFORE",
+    "BEFORE": "BEFORE",
+    "STARTED": "LIVE",
+    "LIVE": "LIVE",
+    "RESULT": "RESULT",
+    "END": "RESULT",
+    "CANCEL": "CANCEL",
+    "POSTPONED": "CANCEL",
+    "SUSPENDED": "CANCEL",
 }
 
 # 우리가 추적하는 응원 팀들
@@ -96,6 +129,39 @@ def today_kst() -> dt.date:
     return dt.datetime.now(KST).date()
 
 
+def _parse_game_time(raw: dict[str, Any]) -> str:
+    """Naver의 시간 필드들을 HH:MM으로 정규화합니다.
+
+    우선순위:
+    1) gameDateTime: "2026-04-28T18:30:00" → "18:30"
+    2) gtime / gameTime: "18:30" 또는 "18:30:00" → "18:30"
+    """
+    raw_dt = raw.get("gameDateTime") or ""
+    if "T" in raw_dt:
+        # ISO 형식: T 다음의 HH:MM만 추출
+        time_part = raw_dt.split("T", 1)[1]
+        return time_part[:5]  # "18:30:00" → "18:30"
+
+    fallback = raw.get("gtime") or raw.get("gameTime") or ""
+    return fallback[:5]
+
+
+def _resolve_stadium(raw: dict[str, Any], home_code: str) -> str:
+    """경기장 이름.
+
+    Naver의 일정 API에는 stadium 필드가 없으므로,
+    홈팀 코드로부터 홈구장을 룩업합니다.
+    혹시 응답에 stadium이 들어오는 경우(중립경기 등)에는 그걸 우선합니다.
+    """
+    return (
+        raw.get("stadium")
+        or raw.get("stadiumName")
+        or raw.get("ballparkName")
+        or raw.get("place")
+        or HOME_STADIUM.get(home_code, "")
+    )
+
+
 def fetch_schedule(date: dt.date) -> list[Game]:
     """해당 날짜의 KBO 경기 일정을 가져옵니다."""
     url = f"{BASE}/schedule/games"
@@ -111,22 +177,41 @@ def fetch_schedule(date: dt.date) -> list[Game]:
     games_raw = (payload.get("result") or {}).get("games") or []
     games: list[Game] = []
     for g in games_raw:
-        home = g.get("homeTeamCode", "")
-        away = g.get("awayTeamCode", "")
+        # Naver는 reversedHomeAway=True일 때 home/away 필드를 표시 우선순위로 뒤집어 둡니다.
+        # 우리는 항상 "실제 홈/원정" 기준으로 저장합니다.
+        reversed_ha = bool(g.get("reversedHomeAway"))
+
+        api_home_code = g.get("homeTeamCode", "")
+        api_away_code = g.get("awayTeamCode", "")
+        api_home_score = g.get("homeTeamScore")
+        api_away_score = g.get("awayTeamScore")
+
+        if reversed_ha:
+            home_code, away_code = api_away_code, api_home_code
+            home_score, away_score = api_away_score, api_home_score
+        else:
+            home_code, away_code = api_home_code, api_away_code
+            home_score, away_score = api_home_score, api_away_score
+
+        raw_status = g.get("statusCode") or g.get("gameStatusCode") or "READY"
+        status = STATUS_MAP.get(raw_status, "BEFORE")
+        if g.get("cancel") or g.get("cancelFlag") or g.get("suspended"):
+            status = "CANCEL"
+
         games.append(
             Game(
                 game_id=str(g.get("gameId", "")),
                 game_date=g.get("gameDate", date.isoformat()),
-                game_time=g.get("gameDateTime", "")[-5:] if g.get("gameDateTime") else g.get("gtime", ""),
-                stadium=g.get("stadium", ""),
-                home_code=home,
-                away_code=away,
-                home_name=TEAM_NAME.get(home, home),
-                away_name=TEAM_NAME.get(away, away),
-                home_score=g.get("homeTeamScore"),
-                away_score=g.get("awayTeamScore"),
-                status=g.get("statusCode") or g.get("gameStatusCode") or "BEFORE",
-                cancel_reason=g.get("cancelFlag") and g.get("suspendedReason"),
+                game_time=_parse_game_time(g),
+                stadium=_resolve_stadium(g, home_code),
+                home_code=home_code,
+                away_code=away_code,
+                home_name=TEAM_NAME.get(home_code, home_code),
+                away_name=TEAM_NAME.get(away_code, away_code),
+                home_score=home_score,
+                away_score=away_score,
+                status=status,
+                cancel_reason=g.get("statusInfo") if status == "CANCEL" else None,
             )
         )
     return games
