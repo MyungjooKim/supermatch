@@ -1,0 +1,36 @@
+name: Update KBO Canvas
+
+on:
+  schedule:
+    # 한국시간 매일 오전 8시 (전날 경기 결과가 정리된 시점)
+    # + 한국시간 매일 밤 11시 30분 (당일 경기 종료 후)
+    # GitHub Actions는 UTC 기준이므로 -9시간
+    - cron: "0 23 * * *"   # KST 08:00
+    - cron: "30 14 * * *"  # KST 23:30
+  workflow_dispatch:        # 수동 실행 버튼
+
+concurrency:
+  group: kbo-canvas
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Update Canvas
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CANVAS_ID: ${{ secrets.SLACK_CANVAS_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python src/main.py update
