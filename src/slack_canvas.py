@@ -162,6 +162,38 @@ class SlackCanvasClient:
             },
         )
 
+    def debug_probe_methods(self, canvas_id: str, label: str = "") -> None:
+        """[DIAG-ONLY] 다양한 canvases.* / files.* 메서드로 canvas 본문 read 가능한지 probe.
+
+        목표: 빈 표가 어디서 오는지 이해하려면 Canvas의 실제 contents를 봐야 함.
+        """
+        candidates = [
+            # GET 메서드처럼 정보만 반환하는 후보들
+            ("files.info", "POST", {"file": canvas_id}),
+            ("canvases.info", "POST", {"canvas_id": canvas_id}),
+            ("canvases.get", "POST", {"canvas_id": canvas_id}),
+            ("canvases.read", "POST", {"canvas_id": canvas_id}),
+            ("canvases.contents", "POST", {"canvas_id": canvas_id}),
+            # 더 다양한 section_types 시도 (docs에는 없지만 유효할 수도)
+            ("table_section_type", "POST_LOOKUP", {"section_types": ["table"]}),
+            ("list_section_type", "POST_LOOKUP", {"section_types": ["list"]}),
+            ("any_section_type", "POST_LOOKUP", {"section_types": ["any"]}),
+            ("paragraph_section_type", "POST_LOOKUP", {"section_types": ["paragraph"]}),
+            ("text_section_type", "POST_LOOKUP", {"section_types": ["text"]}),
+        ]
+        for cl, op, payload in candidates:
+            try:
+                if op == "POST_LOOKUP":
+                    data = self._post("canvases.sections.lookup", {"canvas_id": canvas_id, "criteria": payload})
+                    sections = data.get("sections") or []
+                    print(f"[PROBE2 {label}] {cl}: OK {len(sections)} sections", flush=True)
+                else:
+                    data = self._post(cl, payload)
+                    print(f"[PROBE2 {label}] {cl}: OK keys={list(data.keys())[:8]}", flush=True)
+            except Exception as e:
+                msg = str(e)[:200]
+                print(f"[PROBE2 {label}] {cl}: ERR {msg}", flush=True)
+
     def insert_at_end(self, canvas_id: str, markdown: str) -> None:
         """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
         self._post(
