@@ -82,22 +82,52 @@ class SlackCanvasClient:
             },
         )
 
-    def list_all_sections(self, canvas_id: str) -> list[str]:
-        """Canvas에 존재하는 모든 섹션의 ID를 반환합니다.
+    def list_all_sections(self, canvas_id: str, text_anchors: list[str] | None = None) -> list[str]:
+        """Canvas에 존재하는 (가능한 한) 모든 섹션 ID를 반환합니다.
 
-        Slack의 section_types enum은 h1/h2/h3/any_header만 허용 (any_text 없음).
-        Slack 문서에 따르면 section_types 필터 없이 lookup하면 모든 섹션을
-        가져올 수 있다고 안내합니다. criteria의 contains_text를 빈 문자열로 두어
-        "어떤 텍스트든 포함" 의미로 매칭시킵니다.
+        Slack API 제약:
+        - section_types enum은 h1/h2/h3/any_header만 허용 (any_text 없음)
+        - contains_text는 비어있으면 거부 (must be > 0 chars)
+        - 즉 "전체 섹션을 한 번에" 받는 깔끔한 호출이 없음
+
+        대응: any_header로 모든 헤더 섹션을 가져오고,
+              본문 텍스트 섹션은 호출자가 anchor 후보들을 넘겨 따로 lookup.
+              결과 ID는 set으로 합쳐 중복 제거.
         """
-        data = self._post(
-            "canvases.sections.lookup",
-            {
-                "canvas_id": canvas_id,
-                "criteria": {"contains_text": ""},
-            },
-        )
-        return [s["id"] for s in (data.get("sections") or []) if s.get("id")]
+        ids: set[str] = set()
+
+        # 1) 모든 헤더 섹션
+        try:
+            data = self._post(
+                "canvases.sections.lookup",
+                {
+                    "canvas_id": canvas_id,
+                    "criteria": {"section_types": ["any_header"]},
+                },
+            )
+            for s in data.get("sections") or []:
+                if s.get("id"):
+                    ids.add(s["id"])
+        except RuntimeError as e:
+            print(f"[warn] header lookup failed: {e}")
+
+        # 2) 본문 텍스트 섹션 — 호출자가 알려준 anchor 단어들로 추가 매칭
+        for anchor in text_anchors or []:
+            try:
+                data = self._post(
+                    "canvases.sections.lookup",
+                    {
+                        "canvas_id": canvas_id,
+                        "criteria": {"contains_text": anchor},
+                    },
+                )
+                for s in data.get("sections") or []:
+                    if s.get("id"):
+                        ids.add(s["id"])
+            except RuntimeError as e:
+                print(f"[warn] text lookup '{anchor}' failed: {e}")
+
+        return list(ids)
 
     def delete_sections(self, canvas_id: str, section_ids: list[str]) -> None:
         """주어진 섹션들을 한 번의 edit 호출로 모두 삭제합니다."""

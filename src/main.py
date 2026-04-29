@@ -74,6 +74,11 @@ def cmd_update(args) -> None:
     이전 구현은 anchor 텍스트로 섹션을 lookup해서 replace 했지만,
     Slack의 contains_text 매칭이 여러 섹션을 잡으면서 잔여 섹션이 누적됐습니다.
     wipe-and-refill로 바꿔 매 실행마다 정확히 1세트만 보이도록 합니다.
+
+    Slack API는 "모든 섹션 한 번에 가져오기"를 지원하지 않아,
+    any_header + 본문에 자주 등장하는 단어들을 anchor로 여러 번 lookup해
+    가능한 모든 섹션을 모은 뒤 일괄 삭제합니다. 삭제 후에도 잔여 섹션이
+    남았는지 한 번 더 확인해 정리합니다.
     """
     canvas_id = args.canvas_id or os.environ["SLACK_CANVAS_ID"]
     date = today_kst()
@@ -83,11 +88,24 @@ def cmd_update(args) -> None:
     summaries = build_summaries(games, claude)
     markdown = render_full_canvas(date, games, summaries)
 
+    # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 항상 등장하는 단어들
+    text_anchors = [
+        "vs",          # 팀 카드 본문 ("vs KT 위즈 · 잠실 · ...")
+        "구장",        # 일정표 헤더 행
+        "데이터",      # 푸터
+        "경기 예정",   # 팀 카드
+        "경기중",      # 일정표
+        "종료",        # 일정표
+        "취소",        # 일정표
+    ]
+
     slack = SlackCanvasClient()
-    section_ids = slack.list_all_sections(canvas_id)
-    if section_ids:
+    for attempt in range(3):
+        section_ids = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
+        if not section_ids:
+            break
         slack.delete_sections(canvas_id, section_ids)
-        print(f"✓ cleared {len(section_ids)} existing sections")
+        print(f"✓ pass {attempt + 1}: cleared {len(section_ids)} sections")
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
 
