@@ -252,6 +252,38 @@ def cmd_update(args) -> None:
         print(f"✓ inserted chunk {i}/{len(chunks)} ({len(chunk)} chars)")
     print("✓ canvas refreshed")
 
+    # [DIAG] 사용자 제공 단서: focus_section_id URL로 표 섹션 ID 확보됨.
+    # lookup으로 못 받는 표 컨테이너 ID로 직접 delete/replace 시도.
+    target_id = "temp:C:BWZ89107ab64bc20ad673c39a117"
+    print(f"[DIAG] trying explicit delete on: {target_id}", flush=True)
+    try:
+        slack._post(
+            "canvases.edit",
+            {
+                "canvas_id": canvas_id,
+                "changes": [{"operation": "delete", "section_id": target_id}],
+            },
+        )
+        print(f"[DIAG] DELETE OK", flush=True)
+    except Exception as e:
+        print(f"[DIAG] DELETE failed: {str(e)[:300]}", flush=True)
+        # delete 실패하면 replace로 빈 markdown 시도
+        try:
+            slack._post(
+                "canvases.edit",
+                {
+                    "canvas_id": canvas_id,
+                    "changes": [{
+                        "operation": "replace",
+                        "section_id": target_id,
+                        "document_content": {"type": "markdown", "markdown": ""},
+                    }],
+                },
+            )
+            print(f"[DIAG] REPLACE-empty OK", flush=True)
+        except Exception as e2:
+            print(f"[DIAG] REPLACE-empty failed: {str(e2)[:300]}", flush=True)
+
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
         slack.rename(canvas_id, CANVAS_TITLE)
