@@ -114,7 +114,12 @@ def render_team_section(
 
 
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
-    """오늘의 KBO 전체 경기 일정 테이블."""
+    """오늘의 KBO 전체 경기 일정.
+
+    Slack Canvas의 `insert_at_end`가 마크다운 테이블을 처리할 때
+    phantom placeholder table을 부수효과로 생성하는 quirk가 있어서,
+    테이블 대신 굵은 시간 + 본문 한 줄 구조의 리스트 형식을 사용합니다.
+    """
     parts = ["## :clipboard: 오늘의 전체 일정"]
 
     if is_monday(date) and not games:
@@ -128,28 +133,32 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    parts.append("| 시간 | 원정 | 점수 | 홈 | 구장 | 상태 |")
-    parts.append("| :--: | :--: | :--: | :--: | :--: | :--: |")
     for g in sorted(games, key=lambda x: x.game_time or "99:99"):
         away_emoji = TEAM_EMOJI.get(g.away_code, "")
         home_emoji = TEAM_EMOJI.get(g.home_code, "")
         if g.is_canceled:
-            score = "취소"
-            status = "—"
+            line = (
+                f"- **{g.game_time or '—'}** {away_emoji} {g.away_name} "
+                f"vs {home_emoji} {g.home_name} · {g.stadium} · _경기 취소_"
+            )
         elif g.is_finished:
-            score = f"**{g.away_score} : {g.home_score}**"
-            status = "종료"
+            line = (
+                f"- **{g.game_time or '—'}** {away_emoji} {g.away_name} "
+                f"**{g.away_score} : {g.home_score}** {home_emoji} {g.home_name} "
+                f"· {g.stadium} · 종료"
+            )
         elif g.status == "LIVE":
-            score = f"{g.away_score or 0} : {g.home_score or 0}"
-            status = "경기중"
+            line = (
+                f"- **{g.game_time or '—'}** {away_emoji} {g.away_name} "
+                f"{g.away_score or 0} : {g.home_score or 0} {home_emoji} {g.home_name} "
+                f"· {g.stadium} · _경기 중_"
+            )
         else:
-            score = "—"
-            status = "예정"
-        time_label = g.game_time or "—"
-        parts.append(
-            f"| {time_label} | {away_emoji} {g.away_name} | {score} | "
-            f"{home_emoji} {g.home_name} | {g.stadium} | {status} |"
-        )
+            line = (
+                f"- **{g.game_time or '—'}** {away_emoji} {g.away_name} "
+                f"vs {home_emoji} {g.home_name} · {g.stadium} · 예정"
+            )
+        parts.append(line)
     return "\n".join(parts) + "\n"
 
 
