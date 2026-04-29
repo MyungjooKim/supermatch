@@ -172,6 +172,13 @@ def _pad_left(s: str, target_width: int) -> str:
     return " " * max(0, target_width - _display_width(s)) + s
 
 
+def _pad_center(s: str, target_width: int) -> str:
+    """문자열을 target_width 안에서 가운데 정렬."""
+    space = max(0, target_width - _display_width(s))
+    left = space // 2
+    return " " * left + s + " " * (space - left)
+
+
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
     """오늘의 KBO 전체 경기 일정 — monospace 코드블록.
 
@@ -192,19 +199,20 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    # 컬럼 폭 (display width 기준). 한글 팀명/구장 고려해 여유 있게.
-    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 5, 14, 7, 4, 6
+    # 컬럼 폭 (display width). | 구분자가 컬럼 경계를 명확히 해주므로
+    # Slack 폰트의 한글 폭 미세 차이가 시각적으로 거의 안 보임.
+    # 원정/홈 컬럼은 ⭐ 마커(2칸) + 팀명(최대 12칸) = 14칸.
+    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 6, 16, 7, 6, 7
 
     parts.append("```")
-    parts.append(
-        f"{_pad_right('시간', W_TIME)}  "
-        f"{_pad_right('원정', W_TEAM + 1)} "  # +1 = ⭐ 마커 자리
-        f"{_pad_right('점수', W_SCORE)} "
-        f"{_pad_right('홈', W_TEAM + 1)} "
-        f"{_pad_right('구장', W_STADIUM)} "
-        f"{_pad_right('상태', W_STATUS)}"
-    )
-    parts.append("─" * 60)
+    # 헤더: 가운데 정렬 + | 구분자
+    headers = ["시간", "원정", "점수", "홈", "구장", "상태"]
+    widths = [W_TIME, W_TEAM, W_SCORE, W_TEAM, W_STADIUM, W_STATUS]
+    parts.append(" | ".join(_pad_center(h, w) for h, w in zip(headers, widths)))
+    # 구분선: 전체 폭 = 각 컬럼 + (구분자 ' | ' 3칸 × 5개)
+    total_width = sum(widths) + 3 * (len(widths) - 1)
+    parts.append("─" * total_width)
+
     for g in sorted(games, key=lambda x: x.game_time or "99:99"):
         if g.is_canceled:
             score, status = "취소", "—"
@@ -217,14 +225,18 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         time_label = g.game_time or "—"
         away_marker = "⭐" if g.away_code in TARGET_TEAMS else "  "
         home_marker = "⭐" if g.home_code in TARGET_TEAMS else "  "
-        parts.append(
-            f"{_pad_right(time_label, W_TIME)}  "
-            f"{away_marker}{_pad_right(g.away_name, W_TEAM)} "
-            f"{_pad_right(score, W_SCORE)} "
-            f"{home_marker}{_pad_right(g.home_name, W_TEAM)} "
-            f"{_pad_right(g.stadium, W_STADIUM)} "
-            f"{_pad_right(status, W_STATUS)}"
-        )
+        # 팀 셀: 마커(2칸) + 팀명(좌측정렬, 나머지 폭)
+        away_cell = away_marker + _pad_right(g.away_name, W_TEAM - 2)
+        home_cell = home_marker + _pad_right(g.home_name, W_TEAM - 2)
+        cells = [
+            _pad_center(time_label, W_TIME),
+            away_cell,
+            _pad_center(score, W_SCORE),
+            home_cell,
+            _pad_center(g.stadium, W_STADIUM),
+            _pad_center(status, W_STATUS),
+        ]
+        parts.append(" | ".join(cells))
     parts.append("```")
     return "\n".join(parts) + "\n"
 
@@ -276,37 +288,33 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     """
     parts = ["## :bar_chart: KBO 팀 순위"]
 
-    # 컬럼 폭 (display width)
-    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 14, 4, 4, 4, 4
-    W_PCT, W_GB, W_STREAK = 6, 6, 5
+    # 컬럼 폭. 팀 컬럼은 ⭐(2) + 팀명(최대 12) = 14
+    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 5, 16, 5, 4, 4, 4
+    W_PCT, W_GB, W_STREAK = 6, 7, 5
 
     parts.append("```")
-    parts.append(
-        f"{_pad_right('순위', W_RANK)} "
-        f"{_pad_right('팀', W_TEAM + 1)} "  # +1 for ⭐ marker slot
-        f"{_pad_right('경기', W_G)} "
-        f"{_pad_right('승', W_W)} "
-        f"{_pad_right('무', W_D)} "
-        f"{_pad_right('패', W_L)} "
-        f"{_pad_right('승률', W_PCT)} "
-        f"{_pad_right('게임차', W_GB)} "
-        f"{_pad_right('연속', W_STREAK)}"
-    )
-    parts.append("─" * 65)
+    headers = ["순위", "팀", "경기", "승", "무", "패", "승률", "게임차", "연속"]
+    widths = [W_RANK, W_TEAM, W_G, W_W, W_D, W_L, W_PCT, W_GB, W_STREAK]
+    parts.append(" | ".join(_pad_center(h, w) for h, w in zip(headers, widths)))
+    total_width = sum(widths) + 3 * (len(widths) - 1)
+    parts.append("─" * total_width)
+
     for s in standings:
         marker = "⭐" if s.team_code in TARGET_TEAMS else "  "
         gb = "—" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}"
-        parts.append(
-            f"{_pad_left(str(s.ranking), W_RANK)} "
-            f"{marker}{_pad_right(s.team_name, W_TEAM)} "
-            f"{_pad_left(str(s.games), W_G)} "
-            f"{_pad_left(str(s.wins), W_W)} "
-            f"{_pad_left(str(s.draws), W_D)} "
-            f"{_pad_left(str(s.losses), W_L)} "
-            f"{_pad_left(f'{s.win_rate:.3f}', W_PCT)} "
-            f"{_pad_left(gb, W_GB)} "
-            f"{_pad_left(s.streak, W_STREAK)}"
-        )
+        team_cell = marker + _pad_right(s.team_name, W_TEAM - 2)
+        cells = [
+            _pad_center(str(s.ranking), W_RANK),
+            team_cell,
+            _pad_center(str(s.games), W_G),
+            _pad_center(str(s.wins), W_W),
+            _pad_center(str(s.draws), W_D),
+            _pad_center(str(s.losses), W_L),
+            _pad_center(f"{s.win_rate:.3f}", W_PCT),
+            _pad_center(gb, W_GB),
+            _pad_center(s.streak, W_STREAK),
+        ]
+        parts.append(" | ".join(cells))
     parts.append("```")
 
     # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
