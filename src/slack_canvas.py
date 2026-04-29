@@ -130,18 +130,22 @@ class SlackCanvasClient:
         return list(ids)
 
     def delete_sections(self, canvas_id: str, section_ids: list[str]) -> None:
-        """주어진 섹션들을 한 번의 edit 호출로 모두 삭제합니다."""
-        if not section_ids:
-            return
-        self._post(
-            "canvases.edit",
-            {
-                "canvas_id": canvas_id,
-                "changes": [
-                    {"operation": "delete", "section_id": sid} for sid in section_ids
-                ],
-            },
-        )
+        """주어진 섹션들을 모두 삭제합니다.
+
+        canvases.edit는 한 호출에 changes 1개만 허용하므로, 섹션마다 따로 호출.
+        """
+        for sid in section_ids:
+            try:
+                self._post(
+                    "canvases.edit",
+                    {
+                        "canvas_id": canvas_id,
+                        "changes": [{"operation": "delete", "section_id": sid}],
+                    },
+                )
+            except RuntimeError as e:
+                # 다른 섹션 삭제로 함께 사라진 경우(404 등)는 무시
+                print(f"[warn] delete section {sid} failed: {e}")
 
     def rename(self, canvas_id: str, title_markdown: str) -> None:
         """Canvas의 title을 갱신합니다. title_content는 markdown 포맷."""
