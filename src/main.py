@@ -66,15 +66,15 @@ def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str,
     return out
 
 
-def build_canvas_markdown(date: dt.date) -> str:
-    """오늘의 시즌 단계를 판정하고 적절한 Canvas 본문 markdown을 반환합니다.
+def build_canvas_chunks(date: dt.date) -> list[str]:
+    """오늘의 시즌 단계를 판정해 본문을 여러 markdown 청크로 반환합니다.
 
-    init/update 양쪽에서 공유. 5단계 분기:
-      OFFSEASON_BEFORE / PRESEASON: 작년 최종 순위
-      REGULAR_SEASON + 경기있음: GAMES 화면
-      REGULAR_SEASON + 경기없음: 진행 중 순위
-      POSTSEASON: 진출 5팀 + 오늘 PO 경기
-      OFFSEASON_AFTER: 올해 최종 순위
+    Slack `insert_at_end`는 큰 마크다운 한 번에 보내면 placeholder 표를
+    부수효과로 만드는 quirk가 관찰됐습니다. 본문을 작은 청크들로 쪼개
+    순차적으로 insert하면 각 호출이 단순해서 placeholder가 줄어들 수 있습니다.
+
+    REGULAR_SEASON + 경기있음 케이스만 4개 청크 (header / team_section /
+    schedule / footer)로 쪼개고, 나머지 stage는 단일 청크 그대로.
     """
     games = fetch_schedule(date)
     stage = detect_season_stage(date, RealFetcher())
@@ -84,20 +84,27 @@ def build_canvas_markdown(date: dt.date) -> str:
         last_year = date.year - 1
         last_year_stats = fetch_team_stats(last_year)
         if stage == SeasonStage.PRESEASON:
-            return render_preseason(date, last_year, last_year_stats)
-        return render_offseason_before(date, last_year, last_year_stats)
+            return [render_preseason(date, last_year, last_year_stats)]
+        return [render_offseason_before(date, last_year, last_year_stats)]
 
     if stage == SeasonStage.OFFSEASON_AFTER:
         final_stats = fetch_team_stats(date.year)
-        return render_offseason_after(date, date.year, final_stats)
+        return [render_offseason_after(date, date.year, final_stats)]
 
     if stage == SeasonStage.POSTSEASON:
         standings = fetch_team_stats(date.year)
         top5 = standings[:5]
-        return render_postseason_top5(date, games, top5)
+        return [render_postseason_top5(date, games, top5)]
 
     # REGULAR_SEASON
     if games:
+        from render import (
+            render_footer,
+            render_header,
+            render_schedule_table,
+            render_team_section,
+        )
+
         claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         summaries = build_summaries(games, claude)
         # 응원팀 경기들의 선발투수 미리 fetch — 시작 전 카드에 (이름) 표기용
@@ -108,9 +115,19 @@ def build_canvas_markdown(date: dt.date) -> str:
                 starters_by_game[tg.game_id] = fetch_starting_pitchers(
                     tg.game_id, tg.home_code
                 )
-        return render_full_canvas(date, games, summaries, starters_by_game)
+        return [
+            render_header(date),
+            render_team_section(games, summaries, starters_by_game),
+            render_schedule_table(date, games),
+            render_footer(),
+        ]
     standings = fetch_team_stats(date.year)
-    return render_full_standings(date, standings)
+    return [render_full_standings(date, standings)]
+
+
+def build_canvas_markdown(date: dt.date) -> str:
+    """기존 호환성용 — 청크들을 합쳐 한 string으로 반환. cmd_init에서만 사용."""
+    return "\n".join(build_canvas_chunks(date))
 
 
 def cmd_init(args) -> None:
@@ -137,7 +154,7 @@ def cmd_update(args) -> None:
     """
     canvas_id = args.canvas_id or os.environ["SLACK_CANVAS_ID"]
     date = today_kst()
-    markdown = build_canvas_markdown(date)
+    chunks = build_canvas_chunks(date)
 
     # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 자주 등장하는 단어들.
     # any_header가 잡지 못하는 본문 텍스트 섹션을 contains_text로 보완 매칭합니다.
@@ -212,8 +229,12 @@ def cmd_update(args) -> None:
             file=sys.stderr,
         )
 
-    # 2) 새 본문 삽입
-    slack.insert_at_end(canvas_id, markdown)
+    # 2) 새 본문 삽입 — 청크별로 순차 insert.
+    # 가설: Slack의 insert_at_end가 큰 markdown 한 번에 받으면 placeholder 표를
+    # 생성하는 quirk가 있음. 작은 청크로 쪼개 보내면 그 부수효과가 줄어들 수 있음.
+    for i, chunk in enumerate(chunks, 1):
+        slack.insert_at_end(canvas_id, chunk)
+        print(f"✓ inserted chunk {i}/{len(chunks)} ({len(chunk)} chars)")
     print("✓ canvas refreshed")
 
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
