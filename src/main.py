@@ -230,29 +230,9 @@ def cmd_update(args) -> None:
         )
 
     # 2) 새 본문 삽입 — 청크별로 순차 insert.
-    # [DIAG] 각 청크 insert 후 섹션 수 추적해 어느 청크에서 phantom 표가 생기는지 확인.
-    def _probe_count(label: str) -> None:
-        for crit_label, crit in [
-            ("any_header", {"section_types": ["any_header"]}),
-            ("contains_예정", {"contains_text": "예정"}),
-            ("contains_홈", {"contains_text": "홈"}),
-            ("contains_구장", {"contains_text": "구장"}),
-        ]:
-            try:
-                data = slack._post(
-                    "canvases.sections.lookup",
-                    {"canvas_id": canvas_id, "criteria": crit},
-                )
-                n = len(data.get("sections") or [])
-                print(f"  [DIAG {label}] {crit_label}: {n}", flush=True)
-            except Exception as e:
-                print(f"  [DIAG {label}] {crit_label}: ERR {str(e)[:100]}", flush=True)
-
-    _probe_count("after-wipe")
     for i, chunk in enumerate(chunks, 1):
         slack.insert_at_end(canvas_id, chunk)
         print(f"✓ inserted chunk {i}/{len(chunks)} ({len(chunk)} chars)")
-        _probe_count(f"after-chunk-{i}")
     print("✓ canvas refreshed")
 
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
