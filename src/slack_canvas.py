@@ -143,6 +143,21 @@ class SlackCanvasClient:
             },
         )
 
+    def rename(self, canvas_id: str, title_markdown: str) -> None:
+        """Canvas의 title을 갱신합니다. title_content는 markdown 포맷."""
+        self._post(
+            "canvases.edit",
+            {
+                "canvas_id": canvas_id,
+                "changes": [
+                    {
+                        "operation": "rename",
+                        "title_content": {"type": "markdown", "markdown": title_markdown},
+                    }
+                ],
+            },
+        )
+
     def insert_at_end(self, canvas_id: str, markdown: str) -> None:
         """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
         self._post(

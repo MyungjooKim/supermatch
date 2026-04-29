@@ -28,6 +28,10 @@ from render import render_full_canvas
 from slack_canvas import SlackCanvasClient
 from summarize import no_game_message, summarize_game_for_team
 
+# Canvas title — markdown 포맷. :baseball: shortcode가 ⚾로 변환됩니다.
+# rename operation에서도 markdown으로 받기 때문에 init/update가 동일하게 사용.
+CANVAS_TITLE = "오늘의 KBO :baseball:"
+
 
 def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str, str]:
     """LG / 삼성 / 롯데 각각의 카드용 요약 문장을 만듭니다."""
@@ -61,9 +65,7 @@ def cmd_init(args) -> None:
     markdown = render_full_canvas(date, games, summaries)
 
     slack = SlackCanvasClient()
-    # Canvas title은 plain text라 emoji shortcode가 변환되지 않음 → unicode 직접 삽입
-    title = "오늘의 KBO ⚾"
-    canvas_id = slack.create_canvas(title, markdown, channel_id=args.channel)
+    canvas_id = slack.create_canvas(CANVAS_TITLE, markdown, channel_id=args.channel)
     print(f"CANVAS_ID={canvas_id}")
     print("→ 이 값을 GitHub Secrets의 SLACK_CANVAS_ID에 저장하세요.")
 
@@ -100,6 +102,14 @@ def cmd_update(args) -> None:
     ]
 
     slack = SlackCanvasClient()
+
+    # Title 갱신 — Canvas가 어떻게 만들어졌든(직접 생성/init 명령) 매번 보장.
+    try:
+        slack.rename(canvas_id, CANVAS_TITLE)
+        print(f"✓ title set: {CANVAS_TITLE}")
+    except Exception as e:
+        print(f"[warn] rename failed: {e}", file=sys.stderr)
+
     for attempt in range(3):
         section_ids = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
         if not section_ids:
