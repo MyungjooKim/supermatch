@@ -170,11 +170,18 @@ class SlackCanvasClient:
         """
         import json as _json
         import sys as _sys
+        # stdout으로 출력 + 즉시 flush. GH Actions log 순서가 보장되도록.
         for criteria_label, criteria in [
             ("any_header", {"section_types": ["any_header"]}),
-            ("h1_only", {"section_types": ["h1"]}),
-            ("h2_only", {"section_types": ["h2"]}),
-            ("h3_only", {"section_types": ["h3"]}),
+            ("h1", {"section_types": ["h1"]}),
+            ("h2", {"section_types": ["h2"]}),
+            ("h3", {"section_types": ["h3"]}),
+            ("contains_홈", {"contains_text": "홈"}),
+            ("contains_시간", {"contains_text": "시간"}),
+            ("contains_원정", {"contains_text": "원정"}),
+            ("contains_점수", {"contains_text": "점수"}),
+            ("contains_예정", {"contains_text": "예정"}),
+            ("contains_KBO", {"contains_text": "KBO"}),
         ]:
             try:
                 data = self._post(
@@ -182,11 +189,12 @@ class SlackCanvasClient:
                     {"canvas_id": canvas_id, "criteria": criteria},
                 )
                 sections = data.get("sections") or []
-                print(f"[DIAG {label}] criteria={criteria_label}: {len(sections)} sections", file=_sys.stderr)
+                print(f"[DIAG {label}] {criteria_label}: {len(sections)} sections", flush=True)
                 for s in sections[:20]:
-                    print(f"  - {_json.dumps(s, ensure_ascii=False)[:300]}", file=_sys.stderr)
+                    print(f"  - {_json.dumps(s, ensure_ascii=False)[:300]}", flush=True)
             except Exception as e:
-                print(f"[DIAG {label}] criteria={criteria_label}: ERROR {e}", file=_sys.stderr)
+                print(f"[DIAG {label}] {criteria_label}: ERROR {e}", flush=True)
+        _sys.stdout.flush()
 
     def insert_at_end(self, canvas_id: str, markdown: str) -> None:
         """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
