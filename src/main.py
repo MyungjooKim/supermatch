@@ -175,14 +175,12 @@ def cmd_update(args) -> None:
 
     slack = SlackCanvasClient()
 
-    # Title 갱신 — Canvas가 어떻게 만들어졌든(직접 생성/init 명령) 매번 보장.
-    try:
-        slack.rename(canvas_id, CANVAS_TITLE)
-        print(f"✓ title set: {CANVAS_TITLE}")
-    except Exception as e:
-        print(f"[warn] rename failed: {e}", file=sys.stderr)
+    # 순서 주의: wipe → insert → rename.
+    # 이전 코드는 rename을 가장 먼저 호출했는데, 이어지는 wipe가
+    # title을 담고 있는 첫 헤더 섹션까지 함께 삭제하는 부수효과가 있었습니다.
+    # rename을 가장 마지막에 호출해 wipe가 title에 영향 주지 않게 합니다.
 
-    # 잔여 섹션을 끈질기게 정리. 한 pass에서 잡지 못한 섹션이 다음 pass에선
+    # 1) 잔여 섹션을 끈질기게 정리. 한 pass에서 잡지 못한 섹션이 다음 pass에선
     # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
     MAX_PASSES = 5
     for attempt in range(MAX_PASSES):
@@ -193,7 +191,6 @@ def cmd_update(args) -> None:
         slack.delete_sections(canvas_id, section_ids)
         print(f"✓ pass {attempt + 1}: attempted to clear {len(section_ids)} sections")
     else:
-        # 5 pass 후에도 잔여 — 경고만 남기고 진행
         leftover = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
         print(
             f"[warn] {len(leftover)} sections remain after {MAX_PASSES} passes; "
@@ -201,8 +198,16 @@ def cmd_update(args) -> None:
             file=sys.stderr,
         )
 
+    # 2) 새 본문 삽입
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
+
+    # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
+    try:
+        slack.rename(canvas_id, CANVAS_TITLE)
+        print(f"✓ title set: {CANVAS_TITLE}")
+    except Exception as e:
+        print(f"[warn] rename failed: {e}", file=sys.stderr)
 
 
 def main() -> None:
