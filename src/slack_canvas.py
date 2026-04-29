@@ -162,6 +162,30 @@ class SlackCanvasClient:
             },
         )
 
+    def debug_probe_listall(self, canvas_id: str, label: str = "") -> None:
+        """[DIAG-ONLY] criteria 다양한 변형으로 'list all' 가능한지 probe.
+
+        패턴 B(완전 빈 표) 같은 텍스트 없는 섹션을 잡으려면
+        criteria 없이 모든 섹션을 받는 호출 방식이 필요. 본 진단은
+        그 방식이 가능한지 검증.
+        """
+        import json as _json
+        candidates = [
+            ("no_criteria_key", {"canvas_id": canvas_id}),
+            ("empty_criteria", {"canvas_id": canvas_id, "criteria": {}}),
+            ("section_types_all", {"canvas_id": canvas_id, "criteria": {"section_types": ["h1", "h2", "h3"]}}),
+        ]
+        for cl, payload in candidates:
+            try:
+                data = self._post("canvases.sections.lookup", payload)
+                sections = data.get("sections") or []
+                print(f"[PROBE {label}] {cl}: {len(sections)} sections", flush=True)
+                # 한 섹션 sample 확인
+                if sections:
+                    print(f"  sample: {_json.dumps(sections[0], ensure_ascii=False)[:300]}", flush=True)
+            except Exception as e:
+                print(f"[PROBE {label}] {cl}: ERROR {str(e)[:200]}", flush=True)
+
     def insert_at_end(self, canvas_id: str, markdown: str) -> None:
         """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
         self._post(

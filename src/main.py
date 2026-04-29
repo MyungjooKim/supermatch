@@ -204,6 +204,9 @@ def cmd_update(args) -> None:
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
 
+    # [DIAG-ONLY] criteria 없이 list all 가능한지 probe — phantom table 잡으려면 필요
+    slack.debug_probe_listall(canvas_id, label="after-insert")
+
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
         slack.rename(canvas_id, CANVAS_TITLE)
