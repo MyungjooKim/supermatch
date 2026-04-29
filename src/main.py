@@ -202,6 +202,10 @@ def cmd_update(args) -> None:
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
 
+    # [DIAG-ONLY] 빈 표 버그 진단용. Slack이 우리 마크다운을 어떻게 섹션화했는지 확인.
+    # 원인 확인 후 즉시 제거.
+    slack.debug_dump_sections(canvas_id, label="after-insert")
+
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
         slack.rename(canvas_id, CANVAS_TITLE)
