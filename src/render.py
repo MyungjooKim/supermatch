@@ -184,12 +184,20 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
     return "\n".join(parts) + "\n"
 
 
+# 수동 업데이트 버튼 — GitHub Actions workflow_dispatch UI 링크.
+# 페이지에서 "Run workflow" 버튼을 누르면 1~2분 내 갱신됩니다.
+MANUAL_UPDATE_URL = "https://github.com/MyungjooKim/supermatch/actions/workflows/update-canvas.yml"
+
+
 def render_footer() -> str:
     # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
     # KST로 표기하므로 KST tz를 명시합니다.
     now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
         f"---\n"
+        f"[:arrows_counterclockwise: **지금 수동 업데이트**]({MANUAL_UPDATE_URL}) "
+        f"— 클릭 후 GitHub 페이지에서 **Run workflow** 버튼 누르세요\n"
+        f"\n"
         f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_\n"
     )
 
