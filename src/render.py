@@ -47,7 +47,7 @@ ANCHOR_FOOTER = "데이터: Naver 스포츠"
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
     return (
-        f"# :cap: 오늘의 KBO\n"
+        f"# :billed_cap: 우리 팀 오늘\n"
         f"### {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
     )
 
@@ -132,7 +132,8 @@ def render_team_section(
     starters_by_game: {game_id: {"home": 이름, "away": 이름}} 매핑.
     """
     starters_by_game = starters_by_game or {}
-    parts = ["## :star: 우리 팀 오늘"]
+    # 섹션 헤더는 제거. H1 헤더(render_header)가 "우리 팀 오늘" 역할을 함.
+    parts: list[str] = []
     order = ["LG", "SS", "LT"]
     for code in order:
         team_game = next((g for g in games if g.involves(code)), None)

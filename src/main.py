@@ -182,6 +182,9 @@ def cmd_update(args) -> None:
         "게임차",
         "휴식",
         "휴식일",
+        # H1 헤더 — render_header가 만드는 본문 첫 H1 섹션
+        "우리 팀",
+        "KBO",
     ]
 
     slack = SlackCanvasClient()
