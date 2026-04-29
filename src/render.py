@@ -145,23 +145,13 @@ def render_team_section(
 
 
 def _display_width(s: str) -> int:
-    """Slack 코드블록 폰트의 시각적 폭 추정 (한글=2, ASCII=1).
+    """East Asian Wide(한글/이모지) = 2, ASCII = 1.
 
-    중요: Slack 코드블록 폰트에서 ASCII letter/digit은 한글에 비해 좁게 렌더되어
-    같은 character count여도 시각적으로 더 짧아 보입니다. 이를 보정하려고
-    ASCII alphanumeric 1자당 추가 +1 width unit을 더해 "체감 폭"을 계산합니다.
-    그래야 "KT 위즈"가 "한화 이글스" 같은 셀과 비슷한 시각 폭에 도달.
+    Slack 코드블록 폰트에서 한글이 ASCII 2배 폭은 아니지만,
+    ASCII 보정을 추가하면 헤더와 데이터의 폭이 따로 놀아 어긋나 보입니다.
+    단순한 룰을 유지하고 컬럼 폭을 넉넉히 두는 게 시각적으로 더 일관됩니다.
     """
-    width = 0
-    for ch in s:
-        if ord(ch) > 127:
-            width += 2  # 한글/이모지 = 2 units
-        else:
-            width += 1  # ASCII = 1 unit
-            if ch.isalnum():
-                # ASCII letter/digit: 좁게 렌더되므로 추가 보정
-                width += 1
-    return width
+    return sum(2 if ord(c) > 127 else 1 for c in s)
 
 
 def _pad_right(s: str, target_width: int) -> str:
@@ -201,14 +191,14 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    # 컬럼 폭 (display width = ASCII 보정 적용된 시각 폭).
-    # 사용자 명세 기준:
-    # - 시간: 18:30 (9) → 9
-    # - 원정/홈: KIA 타이거즈 (15) + ⭐(2) = 17
-    # - 점수: 88:88 (9) → 9
+    # 컬럼 폭 (한글=2, ASCII=1 기준 display width).
+    # 사용자 명세:
+    # - 시간: 18:30 (5)
+    # - 원정/홈: ⭐(2) + KIA 타이거즈 (12) = 14, 여유 두고 14
+    # - 점수: 88:88 (5)
     # - 구장: 한글 4자 = 8
-    # - 상태: 경기중 (6) → 6
-    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 9, 17, 9, 8, 6
+    # - 상태: 경기중 (6)
+    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 5, 14, 5, 8, 6
 
     parts.append("```")
     # 헤더: 가운데 정렬 + | 구분자
@@ -294,10 +284,9 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     """
     parts = ["## :bar_chart: KBO 팀 순위"]
 
-    # 컬럼 폭 (ASCII 보정 적용). 팀명 최대 = KIA 타이거즈 (15) + ⭐(2) = 17.
-    # 숫자 컬럼은 최대 자릿수 기준 (예: 144 = 6, 0.692 = 9, 9.0 = 5).
-    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 17, 6, 4, 4, 4
-    W_PCT, W_GB, W_STREAK = 9, 7, 6
+    # 컬럼 폭 (한글=2, ASCII=1 기준). 팀명 최대 = ⭐(2) + KIA 타이거즈 (12) = 14.
+    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 14, 4, 3, 3, 3
+    W_PCT, W_GB, W_STREAK = 5, 6, 4
 
     parts.append("```")
     headers = ["순위", "팀", "경기", "승", "무", "패", "승률", "게임차", "연속"]
