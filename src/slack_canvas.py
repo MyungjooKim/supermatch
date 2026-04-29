@@ -82,14 +82,54 @@ class SlackCanvasClient:
             },
         )
 
-    def replace_whole_canvas(self, canvas_id: str, markdown: str) -> None:
-        """가장 단순한 fallback — 본문 전체를 한 섹션으로 갈아끼움.
+    def list_all_sections(self, canvas_id: str) -> list[str]:
+        """Canvas에 존재하는 모든 섹션의 ID를 반환합니다.
 
-        Canvas에 섹션이 하나뿐일 때 또는 lookup이 실패할 때 사용.
+        section_types로 헤딩/텍스트를 모두 잡아 사실상 전체 섹션을 가져옵니다.
+        앵커 누적 문제를 피하기 위해 wipe-and-refill 흐름에서 사용합니다.
         """
-        # canvases.edit는 한 번에 한 operation만 허용하므로
-        # delete 후 insert_at_end 패턴으로 풀거나, 첫 섹션을 replace합니다.
-        # 가장 안전한 방법: 첫 헤딩 섹션을 lookup해서 replace하고,
-        # 그 안에 전체 내용을 다 넣는 것. 하지만 우리는 앵커 패턴을 쓰므로
-        # 이 메서드는 비상용입니다.
-        raise NotImplementedError("앵커 기반 섹션 교체를 사용하세요")
+        data = self._post(
+            "canvases.sections.lookup",
+            {
+                "canvas_id": canvas_id,
+                "criteria": {
+                    "section_types": [
+                        "h1",
+                        "h2",
+                        "h3",
+                        "any_header",
+                        "any_text",
+                    ],
+                },
+            },
+        )
+        return [s["id"] for s in (data.get("sections") or []) if s.get("id")]
+
+    def delete_sections(self, canvas_id: str, section_ids: list[str]) -> None:
+        """주어진 섹션들을 한 번의 edit 호출로 모두 삭제합니다."""
+        if not section_ids:
+            return
+        self._post(
+            "canvases.edit",
+            {
+                "canvas_id": canvas_id,
+                "changes": [
+                    {"operation": "delete", "section_id": sid} for sid in section_ids
+                ],
+            },
+        )
+
+    def insert_at_end(self, canvas_id: str, markdown: str) -> None:
+        """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
+        self._post(
+            "canvases.edit",
+            {
+                "canvas_id": canvas_id,
+                "changes": [
+                    {
+                        "operation": "insert_at_end",
+                        "document_content": {"type": "markdown", "markdown": markdown},
+                    }
+                ],
+            },
+        )

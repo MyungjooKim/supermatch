@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Iterable
 
-from naver_kbo import Game, TARGET_TEAMS, TEAM_NAME, is_monday
+from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, is_monday
 
 WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
@@ -154,7 +154,9 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
 
 
 def render_footer() -> str:
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
+    # KST로 표기하므로 KST tz를 명시합니다.
+    now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
         f"---\n"
         f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_\n"

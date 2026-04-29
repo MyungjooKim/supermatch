@@ -12,10 +12,8 @@ KBO Canvas updater 메인 엔트리포인트.
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import os
 import sys
-import traceback
 
 import anthropic
 
@@ -26,17 +24,7 @@ from naver_kbo import (
     fetch_schedule,
     today_kst,
 )
-from render import (
-    ANCHOR_FOOTER,
-    ANCHOR_HEADER,
-    ANCHOR_SCHEDULE,
-    ANCHOR_TEAMS,
-    render_footer,
-    render_full_canvas,
-    render_header,
-    render_schedule_table,
-    render_team_section,
-)
+from render import render_full_canvas
 from slack_canvas import SlackCanvasClient
 from summarize import no_game_message, summarize_game_for_team
 
@@ -81,37 +69,27 @@ def cmd_init(args) -> None:
 
 
 def cmd_update(args) -> None:
-    """매일 실행 — 4개 섹션을 lookup → replace로 갱신."""
+    """매일 실행 — Canvas 본문을 통째로 비우고 오늘자로 다시 채웁니다.
+
+    이전 구현은 anchor 텍스트로 섹션을 lookup해서 replace 했지만,
+    Slack의 contains_text 매칭이 여러 섹션을 잡으면서 잔여 섹션이 누적됐습니다.
+    wipe-and-refill로 바꿔 매 실행마다 정확히 1세트만 보이도록 합니다.
+    """
     canvas_id = args.canvas_id or os.environ["SLACK_CANVAS_ID"]
     date = today_kst()
     games = fetch_schedule(date)
 
     claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     summaries = build_summaries(games, claude)
-
-    sections = {
-        ANCHOR_HEADER: render_header(date),
-        ANCHOR_TEAMS: render_team_section(games, summaries),
-        ANCHOR_SCHEDULE: render_schedule_table(date, games),
-        ANCHOR_FOOTER: render_footer(),
-    }
+    markdown = render_full_canvas(date, games, summaries)
 
     slack = SlackCanvasClient()
-    failures: list[str] = []
-    for anchor, content in sections.items():
-        try:
-            section_id = slack.lookup_section_by_text(canvas_id, anchor)
-            if section_id is None:
-                failures.append(f"section not found for {anchor!r}")
-                continue
-            slack.replace_section(canvas_id, section_id, content)
-            print(f"✓ updated section {anchor}")
-        except Exception:
-            failures.append(f"failed {anchor}: {traceback.format_exc()}")
-
-    if failures:
-        print("\n".join(failures), file=sys.stderr)
-        sys.exit(1)
+    section_ids = slack.list_all_sections(canvas_id)
+    if section_ids:
+        slack.delete_sections(canvas_id, section_ids)
+        print(f"✓ cleared {len(section_ids)} existing sections")
+    slack.insert_at_end(canvas_id, markdown)
+    print("✓ canvas refreshed")
 
 
 def main() -> None:

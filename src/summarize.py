@@ -13,7 +13,7 @@ import anthropic
 
 from naver_kbo import Game, TEAM_NAME
 
-MODEL = "claude-opus-4-5"  # 안정적이고 비용도 합리적
+MODEL = "claude-haiku-4-5"  # 1~2문장 짧은 요약엔 Haiku로 충분 — Opus 대비 5x 저렴/빠름
 SYSTEM = (
     "당신은 KBO 야구 데일리 브리핑을 작성하는 카피라이터입니다. "
     "박스스코어를 받아서, 지정된 팀 관점에서 승리 또는 패배 이유를 "
