@@ -6,20 +6,29 @@
 ## 동작 방식
 
 ```
-GitHub Actions (매일 KST 08:00, 23:30)
+GitHub Actions (매일 KST 08:00 / 17:00 / 20:00 / 23:30)
     ↓
 [1] 시즌 단계 판정 (season_stage.detect_season_stage)
     standings API의 max(games)로 5단계 분류
 [2] 단계별 데이터 fetch
-    - 정규시즌: 일정 + 박스스코어 (+ Claude 요약)
+    - 정규시즌: 일정 + (해당하면) 선발투수 + 박스스코어 + Claude 요약
     - 휴식일/포스트시즌/비시즌: 팀 순위
-[3] 마크다운 렌더링 (단계별 화면)
+[3] 마크다운 청크 렌더링 (헤더 / 응원팀 카드 / 일정표 / 푸터)
 [4] Slack Canvas 갱신
-    - rename으로 title 보장
-    - wipe-and-refill: 모든 섹션 삭제 → 본문 한 번에 삽입
+    - wipe → insert(청크별) → rename 순서로 호출
+    - wipe는 5 pass retry, anchor 35+개로 phantom 섹션도 정리
 ```
 
 같은 Canvas를 계속 갱신하므로 URL이 유지되고 채널 탭에 고정해두면 편합니다.
+
+### 업데이트 주기 (KST)
+
+| 시각 | 의도 |
+|------|------|
+| 08:00 | 새 하루 시작 — 어제 결과는 잠시 더 보이고 오늘 일정으로 전환 |
+| 17:00 | 주중 18:30 / 주말 17:00 경기 시작 직전 — 선발투수 거의 확정 |
+| 20:00 | 모든 경기 진행 중 — 라이브 점수 + 진행 상태 |
+| 23:30 | 거의 모든 경기 종료 — 최종 결과 + 응원팀 1~2줄 요약 |
 
 ## 시즌별 화면
 
@@ -147,16 +156,22 @@ PR로 `src/season_stage.py`나 `tools/simulate_branches.py` 변경하면
 ## 알아둘 것 / 한계
 
 - **Naver API는 비공식**입니다. 스펙이 바뀌면 `naver_kbo.py`의 응답 파싱을 손봐야 합니다.
+- **Phantom (빈) 표 잔존**: Slack Canvas의 `insert_at_end`가 마크다운 표 처리 시 빈 placeholder 표를 부수효과로 가끔 생성하는 quirk가 있습니다.
+  - 우리가 *생성을 막지는* 못하지만, 다음 wipe 사이클에서 자동 정리됩니다 (anchor 정리 덕분)
+  - 사용자 화면에는 잠시 보였다가 다음 cron에서 사라짐. 급하면 Slack에서 해당 표를 우클릭 → 삭제
+  - 새 화면/필드 추가 시엔 **반드시 [src/main.py](src/main.py)의 `text_anchors`에 새 짧은 단어 추가** (자세한 건 docs/03-report 참조)
 - **시즌 단계 판정의 fallback 한계**:
   - PO 진입은 `max(games) >= 144`로 판정 — 우천연기로 1팀만 144 미만이면 오판 가능
   - KS 종료는 `11/15` 캘린더 fallback (정확한 종료일은 PO 일정 API 별도 확인 필요)
   - 시범경기 vs 정규시즌 구분은 `3/22` 캘린더 fallback
   - 모두 워크플로우는 죽지 않음 — 실데이터 보고 점진적 정교화 예정
-- **요약 비용**: 하루 최대 6회 호출 (LG/삼성/롯데 × 아침/밤). Haiku 4.5 기준 한 달 1달러 미만.
+- **요약 비용**: 23:30 실행에서만 LG/삼성/롯데 × 1회 = 일 3회. Haiku 4.5 기준 한 달 1달러 미만.
+- **GitHub Actions**: 4 × 30 = 120분/월, 무료 한도(2000분/월)의 6%만 사용.
 - **데이터 정확도**: 박스스코어가 늦게 갱신되는 경기가 있어, 밤 11:30 실행으로 보완합니다.
 
 ## 작업 히스토리
 
 | 날짜 | 보고서 | 핵심 |
 |------|--------|------|
-| 2026-04-29 | [docs/03-report/2026-04-29-canvas-bugfix-and-season-stages.md](docs/03-report/2026-04-29-canvas-bugfix-and-season-stages.md) | Canvas 누적 버그 수정 + 5단계 시즌 분기 + 시뮬레이터 |
+| 2026-04-29 (오전) | [docs/03-report/2026-04-29-canvas-bugfix-and-season-stages.md](docs/03-report/2026-04-29-canvas-bugfix-and-season-stages.md) | Canvas 누적 버그 수정 + 5단계 시즌 분기 + 시뮬레이터 |
+| 2026-04-29 (오후) | [docs/03-report/2026-04-29-phantom-tables-and-4x-cron.md](docs/03-report/2026-04-29-phantom-tables-and-4x-cron.md) | Phantom 표 진짜 원인 (`"예정"` anchor 누락) + UX 마이크로 (이모지/타이틀/선발투수) + 4x/day cron |
