@@ -144,8 +144,41 @@ def render_team_section(
     return "\n".join(parts) + "\n"
 
 
+def _display_width(s: str) -> int:
+    """한글 등 East Asian Wide 문자는 2칸, ASCII는 1칸으로 셈.
+
+    monospace 코드블록 안에서 한글/영문 혼합 텍스트를 정렬하기 위해.
+    Slack의 코드블록 렌더링 폰트는 한글이 정확히 ASCII 2칸 폭이라 가정.
+    """
+    width = 0
+    for ch in s:
+        # 간단한 휴리스틱: ASCII 외 문자는 wide(2). 한글/한자/일본어/이모지 모두 처리.
+        # 정확한 East Asian Width 처리는 unicodedata.east_asian_width로 가능하지만
+        # 의존성 추가하지 않고 ord() > 127로 충분.
+        if ord(ch) > 127:
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def _pad_right(s: str, target_width: int) -> str:
+    """문자열 오른쪽에 공백 채워 target_width로."""
+    return s + " " * max(0, target_width - _display_width(s))
+
+
+def _pad_left(s: str, target_width: int) -> str:
+    """문자열 왼쪽에 공백 채워 target_width로 (숫자 우측 정렬용)."""
+    return " " * max(0, target_width - _display_width(s)) + s
+
+
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
-    """오늘의 KBO 전체 경기 일정 테이블."""
+    """오늘의 KBO 전체 경기 일정 — monospace 코드블록.
+
+    Slack Canvas 마크다운 표는 phantom placeholder 컨테이너가 누적되는
+    quirk가 있어 (Slack API로 정리 불가능) 코드블록 + 한글 폭 보정 패딩으로
+    표처럼 정렬된 효과를 냅니다.
+    """
     parts = ["## :clipboard: 오늘의 전체 일정"]
 
     if is_monday(date) and not games:
@@ -159,28 +192,40 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    parts.append("| 시간 | 원정 | 점수 | 홈 | 구장 | 상태 |")
-    parts.append("| :--: | :--: | :--: | :--: | :--: | :--: |")
+    # 컬럼 폭 (display width 기준). 한글 팀명/구장 고려해 여유 있게.
+    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 5, 14, 7, 4, 6
+
+    parts.append("```")
+    parts.append(
+        f"{_pad_right('시간', W_TIME)}  "
+        f"{_pad_right('원정', W_TEAM + 1)} "  # +1 = ⭐ 마커 자리
+        f"{_pad_right('점수', W_SCORE)} "
+        f"{_pad_right('홈', W_TEAM + 1)} "
+        f"{_pad_right('구장', W_STADIUM)} "
+        f"{_pad_right('상태', W_STATUS)}"
+    )
+    parts.append("─" * 60)
     for g in sorted(games, key=lambda x: x.game_time or "99:99"):
-        away_emoji = TEAM_EMOJI.get(g.away_code, "")
-        home_emoji = TEAM_EMOJI.get(g.home_code, "")
         if g.is_canceled:
-            score = "취소"
-            status = "—"
+            score, status = "취소", "—"
         elif g.is_finished:
-            score = f"**{g.away_score} : {g.home_score}**"
-            status = "종료"
+            score, status = f"{g.away_score}:{g.home_score}", "종료"
         elif g.status == "LIVE":
-            score = f"{g.away_score or 0} : {g.home_score or 0}"
-            status = "경기중"
+            score, status = f"{g.away_score or 0}:{g.home_score or 0}", "경기중"
         else:
-            score = "—"
-            status = "예정"
+            score, status = "—", "예정"
         time_label = g.game_time or "—"
+        away_marker = "⭐" if g.away_code in TARGET_TEAMS else "  "
+        home_marker = "⭐" if g.home_code in TARGET_TEAMS else "  "
         parts.append(
-            f"| {time_label} | {away_emoji} {g.away_name} | {score} | "
-            f"{home_emoji} {g.home_name} | {g.stadium} | {status} |"
+            f"{_pad_right(time_label, W_TIME)}  "
+            f"{away_marker}{_pad_right(g.away_name, W_TEAM)} "
+            f"{_pad_right(score, W_SCORE)} "
+            f"{home_marker}{_pad_right(g.home_name, W_TEAM)} "
+            f"{_pad_right(g.stadium, W_STADIUM)} "
+            f"{_pad_right(status, W_STATUS)}"
         )
+    parts.append("```")
     return "\n".join(parts) + "\n"
 
 
@@ -224,32 +269,54 @@ def _last_five_emoji(s: str) -> str:
 
 
 def render_standings_table(standings: list[TeamStanding]) -> str:
-    """KBO 정규시즌 팀 순위 테이블. 응원팀(LG/삼성/롯데)은 굵게 + ⭐."""
-    parts = ["## :bar_chart: KBO 팀 순위"]
-    parts.append("| 순위 | 팀 | 경기 | 승 | 패 | 무 | 승률 | 게임차 | 연속 | 최근 5 |")
-    parts.append("| :--: | :-- | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: |")
-    for s in standings:
-        emoji = TEAM_EMOJI.get(s.team_code, "")
-        is_target = s.team_code in TARGET_TEAMS
-        star = "⭐ " if is_target else ""
-        # 응원팀은 행 전체 굵게 — 마크다운 셀 안에서 **로 감쌈
-        def fmt(v: object) -> str:
-            text = str(v)
-            return f"**{text}**" if is_target else text
+    """KBO 정규시즌 팀 순위 — monospace 코드블록.
 
+    응원팀(LG/삼성/롯데)은 ⭐ 마커로 강조. 표 컨테이너가 아니라
+    monospace 정렬을 쓰는 이유는 schedule_table 주석 참고.
+    """
+    parts = ["## :bar_chart: KBO 팀 순위"]
+
+    # 컬럼 폭 (display width)
+    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 14, 4, 4, 4, 4
+    W_PCT, W_GB, W_STREAK = 6, 6, 5
+
+    parts.append("```")
+    parts.append(
+        f"{_pad_right('순위', W_RANK)} "
+        f"{_pad_right('팀', W_TEAM + 1)} "  # +1 for ⭐ marker slot
+        f"{_pad_right('경기', W_G)} "
+        f"{_pad_right('승', W_W)} "
+        f"{_pad_right('무', W_D)} "
+        f"{_pad_right('패', W_L)} "
+        f"{_pad_right('승률', W_PCT)} "
+        f"{_pad_right('게임차', W_GB)} "
+        f"{_pad_right('연속', W_STREAK)}"
+    )
+    parts.append("─" * 65)
+    for s in standings:
+        marker = "⭐" if s.team_code in TARGET_TEAMS else "  "
         gb = "—" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}"
         parts.append(
-            f"| {fmt(s.ranking)} "
-            f"| {star}{emoji} {fmt(s.team_name)} "
-            f"| {fmt(s.games)} "
-            f"| {fmt(s.wins)} "
-            f"| {fmt(s.losses)} "
-            f"| {fmt(s.draws)} "
-            f"| {fmt(f'{s.win_rate:.3f}')} "
-            f"| {fmt(gb)} "
-            f"| {fmt(s.streak)} "
-            f"| {_last_five_emoji(s.last_five)} |"
+            f"{_pad_left(str(s.ranking), W_RANK)} "
+            f"{marker}{_pad_right(s.team_name, W_TEAM)} "
+            f"{_pad_left(str(s.games), W_G)} "
+            f"{_pad_left(str(s.wins), W_W)} "
+            f"{_pad_left(str(s.draws), W_D)} "
+            f"{_pad_left(str(s.losses), W_L)} "
+            f"{_pad_left(f'{s.win_rate:.3f}', W_PCT)} "
+            f"{_pad_left(gb, W_GB)} "
+            f"{_pad_left(s.streak, W_STREAK)}"
         )
+    parts.append("```")
+
+    # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
+    target_recents = [s for s in standings if s.team_code in TARGET_TEAMS]
+    if target_recents:
+        parts.append("")
+        parts.append("**:star: 응원팀 최근 5경기**")
+        for s in target_recents:
+            parts.append(f"- {s.team_name}: {_last_five_emoji(s.last_five)}")
+
     return "\n".join(parts) + "\n"
 
 
