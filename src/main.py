@@ -90,15 +90,41 @@ def cmd_update(args) -> None:
     summaries = build_summaries(games, claude)
     markdown = render_full_canvas(date, games, summaries)
 
-    # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 항상 등장하는 단어들
+    # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 자주 등장하는 단어들.
+    # any_header가 잡지 못하는 본문 텍스트 섹션을 contains_text로 보완 매칭합니다.
+    # anchor가 많을수록 lookup 횟수가 늘지만 누적 잔여를 더 잘 잡아냅니다.
     text_anchors = [
-        "vs",          # 팀 카드 본문 ("vs KT 위즈 · 잠실 · ...")
-        "구장",        # 일정표 헤더 행
-        "데이터",      # 푸터
-        "경기 예정",   # 팀 카드
-        "경기중",      # 일정표
-        "종료",        # 일정표
-        "취소",        # 일정표
+        "vs",            # 팀 카드 본문
+        "구장",          # 일정표 헤더 행
+        "데이터",        # 푸터
+        "경기 예정",     # 팀 카드
+        "경기중",        # 일정표
+        "종료",          # 일정표
+        "취소",          # 일정표
+        "원정",          # 일정표 헤더
+        "시간",          # 일정표 헤더
+        "점수",          # 일정표 헤더
+        "상태",          # 일정표 헤더
+        "잠실",          # 구장
+        "고척",
+        "사직",
+        "대구",
+        "광주",
+        "대전",
+        "창원",
+        "수원",
+        "인천",
+        "트윈스",        # 팀명
+        "라이온즈",
+        "자이언츠",
+        "히어로즈",
+        "이글스",
+        "랜더스",
+        "타이거즈",
+        "위즈",
+        "다이노스",
+        "베어스",
+        ":",             # 마크다운 emoji shortcode 콜론은 거의 모든 본문에 등장
     ]
 
     slack = SlackCanvasClient()
@@ -110,12 +136,25 @@ def cmd_update(args) -> None:
     except Exception as e:
         print(f"[warn] rename failed: {e}", file=sys.stderr)
 
-    for attempt in range(3):
+    # 잔여 섹션을 끈질기게 정리. 한 pass에서 잡지 못한 섹션이 다음 pass에선
+    # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
+    MAX_PASSES = 5
+    for attempt in range(MAX_PASSES):
         section_ids = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
         if not section_ids:
+            print(f"✓ canvas confirmed empty after pass {attempt}")
             break
         slack.delete_sections(canvas_id, section_ids)
-        print(f"✓ pass {attempt + 1}: cleared {len(section_ids)} sections")
+        print(f"✓ pass {attempt + 1}: attempted to clear {len(section_ids)} sections")
+    else:
+        # 5 pass 후에도 잔여 — 경고만 남기고 진행
+        leftover = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
+        print(
+            f"[warn] {len(leftover)} sections remain after {MAX_PASSES} passes; "
+            f"will append new content anyway",
+            file=sys.stderr,
+        )
+
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
 
