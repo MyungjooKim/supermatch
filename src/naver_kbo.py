@@ -244,3 +244,59 @@ def fetch_box_score(game_id: str) -> dict[str, Any]:
 
 def is_monday(date: dt.date) -> bool:
     return date.weekday() == 0  # 0 = Monday
+
+
+@dataclass
+class TeamStanding:
+    """KBO 정규시즌 팀 순위 한 행."""
+    team_code: str          # "LG", "KT" 등
+    team_name: str          # "LG 트윈스" — TEAM_NAME 매핑 적용
+    ranking: int            # 1~10
+    games: int              # gameCount
+    wins: int               # winGameCount
+    losses: int             # loseGameCount
+    draws: int              # drawnGameCount
+    win_rate: float         # wra (0.692 등)
+    game_behind: float      # gameBehind (0.0 / 1.5 등)
+    streak: str             # continuousGameResult ("2승" / "1패" 등)
+    last_five: str          # lastFiveGames ("WLLWW" 등 5글자)
+    batting_avg: float | None  # offenseHra
+    era: float | None       # defenseEra
+
+
+def fetch_team_stats(year: int) -> list[TeamStanding]:
+    """해당 연도의 KBO 정규시즌 팀 순위(승률 내림차순 10팀)를 가져옵니다.
+
+    seasonCode=year, gameType=REGULAR_SEASON으로 호출하면
+    응답 result.seasonTeamStats가 ranking 오름차순으로 정렬되어 옵니다.
+    """
+    url = f"{BASE}/statistics/categories/kbo/seasons/{year}/teams"
+    params = {"gameType": "REGULAR_SEASON"}
+    resp = requests.get(url, params=params, headers=HEADERS, timeout=10)
+    resp.raise_for_status()
+    payload = resp.json()
+    rows = (payload.get("result") or {}).get("seasonTeamStats") or []
+
+    out: list[TeamStanding] = []
+    for r in rows:
+        code = r.get("teamId", "")
+        out.append(
+            TeamStanding(
+                team_code=code,
+                team_name=TEAM_NAME.get(code, r.get("teamName") or code),
+                ranking=int(r.get("ranking") or 0),
+                games=int(r.get("gameCount") or 0),
+                wins=int(r.get("winGameCount") or 0),
+                losses=int(r.get("loseGameCount") or 0),
+                draws=int(r.get("drawnGameCount") or 0),
+                win_rate=float(r.get("wra") or 0.0),
+                game_behind=float(r.get("gameBehind") or 0.0),
+                streak=str(r.get("continuousGameResult") or "—"),
+                last_five=str(r.get("lastFiveGames") or ""),
+                batting_avg=r.get("offenseHra"),
+                era=r.get("defenseEra"),
+            )
+        )
+    # ranking 기준 정렬 보장 (응답이 이미 정렬되어 있지만 방어적으로)
+    out.sort(key=lambda s: s.ranking)
+    return out

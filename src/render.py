@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Iterable
 
-from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, is_monday
+from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, TeamStanding, is_monday
 
 WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
@@ -173,5 +173,65 @@ def render_full_canvas(
         render_header(date),
         render_team_section(games, summaries),
         render_schedule_table(date, games),
+        render_footer(),
+    ])
+
+
+def _last_five_emoji(s: str) -> str:
+    """'WLLWW' → '🟢⚫⚫🟢🟢' 같은 컬러 점으로 변환."""
+    mapping = {"W": "🟢", "L": "🔴", "D": "⚪", "T": "⚪"}
+    return "".join(mapping.get(c, "·") for c in s)
+
+
+def render_standings_table(standings: list[TeamStanding]) -> str:
+    """KBO 정규시즌 팀 순위 테이블. 응원팀(LG/삼성/롯데)은 굵게 + ⭐."""
+    parts = ["## :bar_chart: KBO 팀 순위"]
+    parts.append("| 순위 | 팀 | 경기 | 승 | 패 | 무 | 승률 | 게임차 | 연속 | 최근 5 |")
+    parts.append("| :--: | :-- | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: |")
+    for s in standings:
+        emoji = TEAM_EMOJI.get(s.team_code, "")
+        is_target = s.team_code in TARGET_TEAMS
+        star = "⭐ " if is_target else ""
+        # 응원팀은 행 전체 굵게 — 마크다운 셀 안에서 **로 감쌈
+        def fmt(v: object) -> str:
+            text = str(v)
+            return f"**{text}**" if is_target else text
+
+        gb = "—" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}"
+        parts.append(
+            f"| {fmt(s.ranking)} "
+            f"| {star}{emoji} {fmt(s.team_name)} "
+            f"| {fmt(s.games)} "
+            f"| {fmt(s.wins)} "
+            f"| {fmt(s.losses)} "
+            f"| {fmt(s.draws)} "
+            f"| {fmt(f'{s.win_rate:.3f}')} "
+            f"| {fmt(gb)} "
+            f"| {fmt(s.streak)} "
+            f"| {_last_five_emoji(s.last_five)} |"
+        )
+    return "\n".join(parts) + "\n"
+
+
+def render_no_games_notice(date: dt.date) -> str:
+    """경기 없는 날 안내. 월요일 정기 휴식과 그 외 휴식을 구분합니다."""
+    if is_monday(date):
+        return (
+            "## :coffee: 오늘은 KBO 휴식일\n"
+            "> 월요일은 정기 휴식일입니다. 선수도, 팬도 잠시 숨을 고르는 하루.\n"
+            "> 아래는 현재 시즌의 팀 순위입니다.\n"
+        )
+    return (
+        "## :zzz: 오늘은 KBO 경기가 없습니다\n"
+        "> 다음 경기를 기다리며, 현재 시즌의 팀 순위를 확인해보세요.\n"
+    )
+
+
+def render_full_standings(date: dt.date, standings: list[TeamStanding]) -> str:
+    """경기 없는 날의 Canvas 본문 — 헤더 + 휴식 안내 + 순위표 + 푸터."""
+    return "\n".join([
+        render_header(date),
+        render_no_games_notice(date),
+        render_standings_table(standings),
         render_footer(),
     ])

@@ -22,9 +22,10 @@ from naver_kbo import (
     TARGET_TEAMS,
     fetch_box_score,
     fetch_schedule,
+    fetch_team_stats,
     today_kst,
 )
-from render import render_full_canvas
+from render import render_full_canvas, render_full_standings
 from slack_canvas import SlackCanvasClient
 from summarize import no_game_message, summarize_game_for_team
 
@@ -60,9 +61,13 @@ def cmd_init(args) -> None:
     date = today_kst()
     games = fetch_schedule(date)
 
-    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    summaries = build_summaries(games, claude)
-    markdown = render_full_canvas(date, games, summaries)
+    if games:
+        claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        summaries = build_summaries(games, claude)
+        markdown = render_full_canvas(date, games, summaries)
+    else:
+        standings = fetch_team_stats(date.year)
+        markdown = render_full_standings(date, standings)
 
     slack = SlackCanvasClient()
     canvas_id = slack.create_canvas(CANVAS_TITLE, markdown, channel_id=args.channel)
@@ -86,9 +91,16 @@ def cmd_update(args) -> None:
     date = today_kst()
     games = fetch_schedule(date)
 
-    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    summaries = build_summaries(games, claude)
-    markdown = render_full_canvas(date, games, summaries)
+    if games:
+        # 경기 있는 날 — 기존 화면 (헤더 / 응원팀 카드 / 일정표 / 푸터)
+        claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        summaries = build_summaries(games, claude)
+        markdown = render_full_canvas(date, games, summaries)
+    else:
+        # 경기 없는 날 — 시즌 팀 순위 화면
+        # 시즌 단계 정교화(요건 4: 비시즌 → 작년 최종 순위)는 다음 step에서 처리
+        standings = fetch_team_stats(date.year)
+        markdown = render_full_standings(date, standings)
 
     # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 자주 등장하는 단어들.
     # any_header가 잡지 못하는 본문 텍스트 섹션을 contains_text로 보완 매칭합니다.
@@ -125,6 +137,12 @@ def cmd_update(args) -> None:
         "다이노스",
         "베어스",
         ":",             # 마크다운 emoji shortcode 콜론은 거의 모든 본문에 등장
+        # standings 화면 전용 anchor
+        "순위",
+        "승률",
+        "게임차",
+        "휴식",
+        "휴식일",
     ]
 
     slack = SlackCanvasClient()
