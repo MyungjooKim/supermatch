@@ -85,17 +85,16 @@ class SlackCanvasClient:
     def list_all_sections(self, canvas_id: str) -> list[str]:
         """Canvas에 존재하는 모든 섹션의 ID를 반환합니다.
 
-        Slack API는 criteria.section_types에 최대 3개까지만 허용하므로
-        any_header + any_text만으로 헤딩과 텍스트 섹션을 모두 잡습니다.
-        앵커 누적 문제를 피하기 위해 wipe-and-refill 흐름에서 사용합니다.
+        Slack의 section_types enum은 h1/h2/h3/any_header만 허용 (any_text 없음).
+        Slack 문서에 따르면 section_types 필터 없이 lookup하면 모든 섹션을
+        가져올 수 있다고 안내합니다. criteria의 contains_text를 빈 문자열로 두어
+        "어떤 텍스트든 포함" 의미로 매칭시킵니다.
         """
         data = self._post(
             "canvases.sections.lookup",
             {
                 "canvas_id": canvas_id,
-                "criteria": {
-                    "section_types": ["any_header", "any_text"],
-                },
+                "criteria": {"contains_text": ""},
             },
         )
         return [s["id"] for s in (data.get("sections") or []) if s.get("id")]
