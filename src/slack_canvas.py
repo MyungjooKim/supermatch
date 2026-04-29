@@ -82,52 +82,58 @@ class SlackCanvasClient:
             },
         )
 
-    def list_all_sections(self, canvas_id: str, text_anchors: list[str] | None = None) -> list[str]:
-        """Canvas에 존재하는 (가능한 한) 모든 섹션 ID를 반환합니다.
+    def list_sections_by_anchors(
+        self,
+        canvas_id: str,
+        priority_anchors: list[str] | None = None,
+        text_anchors: list[str] | None = None,
+        include_headers: bool = True,
+    ) -> list[str]:
+        """우선순위가 있는 anchor 매칭으로 섹션 ID를 반환합니다.
 
-        Slack API 제약:
-        - section_types enum은 h1/h2/h3/any_header만 허용 (any_text 없음)
-        - contains_text는 비어있으면 거부 (must be > 0 chars)
-        - 즉 "전체 섹션을 한 번에" 받는 깔끔한 호출이 없음
+        반환 순서:
+          1. priority_anchors 매칭 (먼저 삭제됨 — 예: 표 셀 단어들)
+          2. include_headers=True면 any_header 매칭
+          3. text_anchors 매칭 (헤더/팀카드/푸터 등)
 
-        대응: any_header로 모든 헤더 섹션을 가져오고,
-              본문 텍스트 섹션은 호출자가 anchor 후보들을 넘겨 따로 lookup.
-              결과 ID는 set으로 합쳐 중복 제거.
+        같은 ID가 여러 anchor에 매칭되면 첫 등장 위치만 사용.
+        호출자가 받은 list 순서대로 delete하면 표 셀이 먼저 비워져서
+        Slack이 빈 표 컨테이너를 정리할 시간을 가질 수 있습니다.
         """
-        ids: set[str] = set()
+        seen: set[str] = set()
+        ordered: list[str] = []
 
-        # 1) 모든 헤더 섹션
-        try:
-            data = self._post(
-                "canvases.sections.lookup",
-                {
-                    "canvas_id": canvas_id,
-                    "criteria": {"section_types": ["any_header"]},
-                },
-            )
-            for s in data.get("sections") or []:
-                if s.get("id"):
-                    ids.add(s["id"])
-        except RuntimeError as e:
-            print(f"[warn] header lookup failed: {e}")
-
-        # 2) 본문 텍스트 섹션 — 호출자가 알려준 anchor 단어들로 추가 매칭
-        for anchor in text_anchors or []:
+        def _collect(criteria: dict, label: str) -> None:
             try:
                 data = self._post(
                     "canvases.sections.lookup",
-                    {
-                        "canvas_id": canvas_id,
-                        "criteria": {"contains_text": anchor},
-                    },
+                    {"canvas_id": canvas_id, "criteria": criteria},
                 )
                 for s in data.get("sections") or []:
-                    if s.get("id"):
-                        ids.add(s["id"])
+                    sid = s.get("id")
+                    if sid and sid not in seen:
+                        seen.add(sid)
+                        ordered.append(sid)
             except RuntimeError as e:
-                print(f"[warn] text lookup '{anchor}' failed: {e}")
+                print(f"[warn] lookup '{label}' failed: {e}")
 
-        return list(ids)
+        # 1) 우선순위 — 표 안의 단어들을 먼저
+        for anchor in priority_anchors or []:
+            _collect({"contains_text": anchor}, f"priority:{anchor}")
+
+        # 2) 헤더 (H1/H2/H3)
+        if include_headers:
+            _collect({"section_types": ["any_header"]}, "any_header")
+
+        # 3) 일반 본문 anchor
+        for anchor in text_anchors or []:
+            _collect({"contains_text": anchor}, f"text:{anchor}")
+
+        return ordered
+
+    # 하위 호환 — 기존 호출자가 list_all_sections 그대로 쓰도록 유지
+    def list_all_sections(self, canvas_id: str, text_anchors: list[str] | None = None) -> list[str]:
+        return self.list_sections_by_anchors(canvas_id, text_anchors=text_anchors)
 
     def delete_sections(self, canvas_id: str, section_ids: list[str]) -> None:
         """주어진 섹션들을 모두 삭제합니다.

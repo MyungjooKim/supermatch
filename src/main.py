@@ -156,24 +156,22 @@ def cmd_update(args) -> None:
     date = today_kst()
     chunks = build_canvas_chunks(date)
 
-    # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 자주 등장하는 단어들.
-    # any_header가 잡지 못하는 본문 텍스트 섹션을 contains_text로 보완 매칭합니다.
-    # anchor가 많을수록 lookup 횟수가 늘지만 누적 잔여를 더 잘 잡아냅니다.
-    text_anchors = [
-        "vs",            # 팀 카드 본문
-        "구장",          # 일정표 헤더 행
-        "데이터",        # 푸터
-        "예정",          # 일정표 상태 셀 + 팀카드 — phantom table은 "예정"만 매칭됨
-        "경기 예정",     # 팀 카드
-        "경기중",        # 일정표
-        "종료",          # 일정표
-        "취소",          # 일정표
+    # 표 안에만 있는 셀 단어들 — wipe 시 가장 먼저 삭제 (사용자 관찰):
+    # "기존 데이터 삭제할 때 표 안 텍스트가 먼저 사라지고, 우리 팀 카드가 사라지지만
+    #  표 컨테이너는 끝까지 안 지워진다" → 표 셀 ID를 *먼저* delete 호출 큐에 넣어
+    # Slack이 빈 표 컨테이너도 함께 정리하도록 시도합니다.
+    table_priority_anchors = [
+        "예정",          # 일정표 상태 셀
+        "경기중",
+        "종료",
+        "취소",
         "원정",          # 일정표 헤더
-        "시간",          # 일정표 헤더
-        "점수",          # 일정표 헤더
-        "상태",          # 일정표 헤더
-        "홈",            # 일정표 헤더 — 빠뜨리면 빈 placeholder 표가 잔존
-        "잠실",          # 구장
+        "시간",
+        "점수",
+        "상태",
+        "홈",
+        "구장",          # 헤더 + 구장명 셀
+        "잠실",
         "고척",
         "사직",
         "대구",
@@ -182,7 +180,14 @@ def cmd_update(args) -> None:
         "창원",
         "수원",
         "인천",
-        "트윈스",        # 팀명
+    ]
+
+    # 일반 본문 anchor — 헤더/팀카드/푸터 (표 외 영역). 표 셀이 다 비워진 후 처리.
+    text_anchors = [
+        "vs",            # 팀 카드 본문
+        "데이터",        # 푸터
+        "경기 예정",     # 팀 카드
+        "트윈스",        # 팀명 (팀 카드 + 일정표)
         "라이온즈",
         "자이언츠",
         "히어로즈",
@@ -192,14 +197,14 @@ def cmd_update(args) -> None:
         "위즈",
         "다이노스",
         "베어스",
-        ":",             # 마크다운 emoji shortcode 콜론은 거의 모든 본문에 등장
-        # standings 화면 전용 anchor
+        ":",             # 마크다운 emoji shortcode 콜론
+        # standings 화면 전용
         "순위",
         "승률",
         "게임차",
         "휴식",
         "휴식일",
-        # H1 헤더 — render_header가 만드는 본문 첫 H1 섹션
+        # H1 헤더
         "우리 팀",
         "KBO",
     ]
@@ -213,16 +218,28 @@ def cmd_update(args) -> None:
 
     # 1) 잔여 섹션을 끈질기게 정리. 한 pass에서 잡지 못한 섹션이 다음 pass에선
     # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
+    # 정렬 순서: 표 셀 단어(priority) → 헤더 → 본문 anchor.
+    # 사용자 관찰에 따르면 표 셀을 먼저 비워야 빈 표 컨테이너가 따라서 정리됨.
     MAX_PASSES = 5
     for attempt in range(MAX_PASSES):
-        section_ids = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
+        section_ids = slack.list_sections_by_anchors(
+            canvas_id,
+            priority_anchors=table_priority_anchors,
+            text_anchors=text_anchors,
+            include_headers=True,
+        )
         if not section_ids:
             print(f"✓ canvas confirmed empty after pass {attempt}")
             break
         slack.delete_sections(canvas_id, section_ids)
-        print(f"✓ pass {attempt + 1}: attempted to clear {len(section_ids)} sections")
+        print(f"✓ pass {attempt + 1}: attempted to clear {len(section_ids)} sections (table-first order)")
     else:
-        leftover = slack.list_all_sections(canvas_id, text_anchors=text_anchors)
+        leftover = slack.list_sections_by_anchors(
+            canvas_id,
+            priority_anchors=table_priority_anchors,
+            text_anchors=text_anchors,
+            include_headers=True,
+        )
         print(
             f"[warn] {len(leftover)} sections remain after {MAX_PASSES} passes; "
             f"will append new content anyway",
