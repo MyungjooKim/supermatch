@@ -144,31 +144,40 @@ def render_team_section(
     return "\n".join(parts) + "\n"
 
 
-def _display_width(s: str) -> int:
-    """East Asian Wide(한글/이모지) = 2, ASCII = 1.
+def _display_width(s: str) -> float:
+    """Slack 코드블록 폰트의 시각적 폭 추정.
 
-    Slack 코드블록 폰트에서 한글이 ASCII 2배 폭은 아니지만,
-    ASCII 보정을 추가하면 헤더와 데이터의 폭이 따로 놀아 어긋나 보입니다.
-    단순한 룰을 유지하고 컬럼 폭을 넉넉히 두는 게 시각적으로 더 일관됩니다.
+    Slack 폰트는 한글이 ASCII 2배 폭이 아니라 약 1.33배 비율로 렌더됩니다.
+    실측 기준: 한글=2, ASCII alphanumeric=1.5, 그 외 ASCII(공백/콜론/하이픈)=1.
+    헤더와 데이터 모두 같은 룰을 적용하므로 | 위치가 일관됩니다.
     """
-    return sum(2 if ord(c) > 127 else 1 for c in s)
+    total = 0.0
+    for c in s:
+        if ord(c) > 127:
+            total += 2  # 한글/이모지/⭐
+        elif c.isalnum():
+            total += 1.5  # ASCII letter/digit (좁게 렌더되지만 공백보다는 넓음)
+        else:
+            total += 1.0  # 공백, 콜론, 하이픈 등
+    return total
 
 
-def _pad_right(s: str, target_width: int) -> str:
-    """문자열 오른쪽에 공백 채워 target_width로."""
-    return s + " " * max(0, target_width - _display_width(s))
+def _pad_right(s: str, target_width: float) -> str:
+    """문자열 오른쪽에 공백 채워 target_width로. width는 float 가능, padding은 round."""
+    return s + " " * max(0, round(target_width - _display_width(s)))
 
 
-def _pad_left(s: str, target_width: int) -> str:
+def _pad_left(s: str, target_width: float) -> str:
     """문자열 왼쪽에 공백 채워 target_width로 (숫자 우측 정렬용)."""
-    return " " * max(0, target_width - _display_width(s)) + s
+    return " " * max(0, round(target_width - _display_width(s))) + s
 
 
-def _pad_center(s: str, target_width: int) -> str:
+def _pad_center(s: str, target_width: float) -> str:
     """문자열을 target_width 안에서 가운데 정렬."""
     space = max(0, target_width - _display_width(s))
-    left = space // 2
-    return " " * left + s + " " * (space - left)
+    left = round(space / 2)
+    right = round(space - left)
+    return " " * left + s + " " * right
 
 
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
@@ -191,14 +200,13 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    # 컬럼 폭 (한글=2, ASCII=1 기준 display width).
-    # 사용자 명세:
-    # - 시간: 18:30 (5)
-    # - 원정/홈: ⭐(2) + KIA 타이거즈 (12) = 14, 여유 두고 14
-    # - 점수: 88:88 (5)
-    # - 구장: 한글 4자 = 8
-    # - 상태: 경기중 (6)
-    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 5, 14, 5, 8, 6
+    # 컬럼 폭 (한글=2, ASCII letter=1.5, 기타 ASCII=1).
+    # - 시간 "18:30" = 7 (4 alnum × 1.5 + 1 colon)
+    # - 팀명 ⭐(2) + KIA 타이거즈(13.5) = 15.5 → 16 여유
+    # - 점수 "88:88" = 7
+    # - 구장 한글 4자 = 8
+    # - 상태 "경기중" = 6
+    W_TIME, W_TEAM, W_SCORE, W_STADIUM, W_STATUS = 7, 16, 7, 8, 6
 
     parts.append("```")
     # 헤더: 가운데 정렬 + | 구분자
@@ -284,9 +292,11 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     """
     parts = ["## :bar_chart: KBO 팀 순위"]
 
-    # 컬럼 폭 (한글=2, ASCII=1 기준). 팀명 최대 = ⭐(2) + KIA 타이거즈 (12) = 14.
-    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 14, 4, 3, 3, 3
-    W_PCT, W_GB, W_STREAK = 5, 6, 4
+    # 컬럼 폭 (한글=2, ASCII letter=1.5, 기타 ASCII=1).
+    # 팀명 최대 = ⭐(2) + KIA 타이거즈(13.5) = 15.5 → 16.
+    # 숫자 컬럼: "26"=3, "144"=4.5, "0.692"=6.5 (4 alnum + dot), "2승"=3.5
+    W_RANK, W_TEAM, W_G, W_W, W_D, W_L = 4, 16, 5, 4, 4, 4
+    W_PCT, W_GB, W_STREAK = 7, 7, 5
 
     parts.append("```")
     headers = ["순위", "팀", "경기", "승", "무", "패", "승률", "게임차", "연속"]
