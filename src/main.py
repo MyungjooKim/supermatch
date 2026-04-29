@@ -23,6 +23,7 @@ from naver_kbo import (
     TARGET_TEAMS,
     fetch_box_score,
     fetch_schedule,
+    fetch_starting_pitchers,
     fetch_team_stats,
     today_kst,
 )
@@ -40,7 +41,7 @@ from summarize import no_game_message, summarize_game_for_team
 
 # Canvas title — markdown 포맷. :baseball: shortcode가 ⚾로 변환됩니다.
 # rename operation에서도 markdown으로 받기 때문에 init/update가 동일하게 사용.
-CANVAS_TITLE = "오늘의 KBO :baseball:"
+CANVAS_TITLE = ":baseball: 오늘의 KBO :baseball:"
 
 
 def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str, str]:
@@ -99,7 +100,15 @@ def build_canvas_markdown(date: dt.date) -> str:
     if games:
         claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         summaries = build_summaries(games, claude)
-        return render_full_canvas(date, games, summaries)
+        # 응원팀 경기들의 선발투수 미리 fetch — 시작 전 카드에 (이름) 표기용
+        starters_by_game: dict[str, dict[str, str]] = {}
+        for code in ("LG", "SS", "LT"):
+            tg = next((g for g in games if g.involves(code)), None)
+            if tg and not tg.is_finished and not tg.is_canceled:
+                starters_by_game[tg.game_id] = fetch_starting_pitchers(
+                    tg.game_id, tg.home_code
+                )
+        return render_full_canvas(date, games, summaries, starters_by_game)
     standings = fetch_team_stats(date.year)
     return render_full_standings(date, standings)
 

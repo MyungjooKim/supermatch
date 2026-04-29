@@ -21,7 +21,7 @@ from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, TeamStanding, is_monda
 WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
 TEAM_EMOJI = {
-    "LG": ":baseball:",
+    "LG": ":two_men_holding_hands:",  # LG 트윈스 어원 — 쌍둥이
     "SS": ":lion_face:",
     # `:seagull:`은 Slack 기본 emoji가 아니어서 텍스트로 노출됨.
     # 워크스페이스에 custom `:seagull:`을 업로드하면 그걸로 바꿔도 됨.
@@ -47,13 +47,27 @@ ANCHOR_FOOTER = "데이터: Naver 스포츠"
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
     return (
-        f"# :baseball: 오늘의 KBO\n"
+        f"# :baseball::raised_back_of_hand: 오늘의 KBO\n"
         f"### {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
     )
 
 
-def render_team_card(team_code: str, game: Game | None, summary: str) -> str:
-    """응원팀 한 팀의 카드를 그립니다."""
+def _name_with_starter(team_name: str, starter: str) -> str:
+    """팀명 옆에 선발투수 이름을 괄호로 붙입니다. starter가 비면 팀명만."""
+    return f"{team_name}({starter})" if starter else team_name
+
+
+def render_team_card(
+    team_code: str,
+    game: Game | None,
+    summary: str,
+    starters: dict[str, str] | None = None,
+) -> str:
+    """응원팀 한 팀의 카드를 그립니다.
+
+    starters: {"home": "이름", "away": "이름"} 형식. 시작 전 경기에서 사용.
+    """
+    starters = starters or {}
     emoji = TEAM_EMOJI.get(team_code, ":baseball:")
     name = TEAM_NAME.get(team_code, team_code)
 
@@ -70,17 +84,25 @@ def render_team_card(team_code: str, game: Game | None, summary: str) -> str:
             f"> 우천 등 사유로 경기 취소 ({game.stadium})\n"
         )
 
-    opp = TEAM_NAME.get(game.opponent_of(team_code), game.opponent_of(team_code))
+    opp_code = game.opponent_of(team_code)
+    opp = TEAM_NAME.get(opp_code, opp_code)
     my_score = game.score_for(team_code)
-    opp_score = game.score_for(game.opponent_of(team_code))
+    opp_score = game.score_for(opp_code)
+
+    # 선발투수 정보 (있으면 괄호로 표기)
+    is_home = team_code == game.home_code
+    my_starter = starters.get("home" if is_home else "away", "")
+    opp_starter = starters.get("away" if is_home else "home", "")
+    my_label = _name_with_starter(name, my_starter)
+    opp_label = _name_with_starter(opp, opp_starter)
 
     if not game.is_finished:
         # 시작 전 / 진행 중
         when = game.game_time or "TBD"
         status_label = "경기 중" if game.status == "LIVE" else f"{when} 경기 예정"
         return (
-            f"### {emoji} {name}\n"
-            f"**vs {opp}** · {game.stadium} · {status_label}\n"
+            f"### {emoji} {my_label}\n"
+            f"**vs {opp_label}** · {game.stadium} · {status_label}\n"
         )
 
     # 결과 있음
@@ -103,13 +125,21 @@ def render_team_card(team_code: str, game: Game | None, summary: str) -> str:
 def render_team_section(
     games: list[Game],
     summaries: dict[str, str],
+    starters_by_game: dict[str, dict[str, str]] | None = None,
 ) -> str:
-    """LG / 삼성 / 롯데 카드 묶음."""
+    """LG / 삼성 / 롯데 카드 묶음.
+
+    starters_by_game: {game_id: {"home": 이름, "away": 이름}} 매핑.
+    """
+    starters_by_game = starters_by_game or {}
     parts = ["## :star: 우리 팀 오늘"]
     order = ["LG", "SS", "LT"]
     for code in order:
         team_game = next((g for g in games if g.involves(code)), None)
-        parts.append(render_team_card(code, team_game, summaries.get(code, "")))
+        starters = starters_by_game.get(team_game.game_id, {}) if team_game else {}
+        parts.append(
+            render_team_card(code, team_game, summaries.get(code, ""), starters)
+        )
     return "\n".join(parts) + "\n"
 
 
@@ -167,11 +197,12 @@ def render_full_canvas(
     date: dt.date,
     games: list[Game],
     summaries: dict[str, str],
+    starters_by_game: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """초기 Canvas 생성용 — 전체 본문을 통째로 렌더링."""
     return "\n".join([
         render_header(date),
-        render_team_section(games, summaries),
+        render_team_section(games, summaries, starters_by_game),
         render_schedule_table(date, games),
         render_footer(),
     ])
