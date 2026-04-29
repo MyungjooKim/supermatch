@@ -178,46 +178,31 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append("> 오늘은 예정된 경기가 없습니다.\n")
         return "\n".join(parts) + "\n"
 
-    # 컬럼 폭 (character count 기준; ⭐=1, 한글=1, ASCII=1로 모두 1자).
-    # 헤더와 데이터가 같은 char count → | 구분자가 같은 column에 위치.
-    # - 시간 "18:30" = 5
-    # - 팀명 "⭐" + 최대 7자 "롯데 자이언츠" = 8
-    # - 점수 "88:88" = 5
-    # - 구장 "잠실" = 2, 여유 두고 4
-    # - 상태 "경기중" = 3
-    N_TIME, N_TEAM, N_SCORE, N_STADIUM, N_STATUS = 5, 8, 5, 4, 3
-
-    parts.append("```")
-    headers = ["시간", "원정", "점수", "홈", "구장", "상태"]
-    sizes = [N_TIME, N_TEAM, N_SCORE, N_TEAM, N_STADIUM, N_STATUS]
-    parts.append(" | ".join(_pad_chars(h, n) for h, n in zip(headers, sizes)))
-    # 구분선: 각 컬럼 char + ' | ' 3 chars * 5개 구분자
-    total_chars = sum(sizes) + 3 * (len(sizes) - 1)
-    parts.append("─" * total_chars)
-
+    # 카드 형태 — 한 경기당 2줄.
+    # 1줄: 시간 + 원정팀(점수)홈팀, 응원팀은 ⭐
+    # 2줄: 구장 · 상태
+    # Slack 코드블록 monospace가 한글에 보장 안 돼 정렬 불가능 →
+    # 정렬 포기 + 시각적 분리(블록쿼트, bold)로 가독성 확보.
     for g in sorted(games, key=lambda x: x.game_time or "99:99"):
         if g.is_canceled:
-            score, status = "취소", "—"
+            score, status = "—", "_경기 취소_"
         elif g.is_finished:
-            score, status = f"{g.away_score}:{g.home_score}", "종료"
+            score, status = f"**{g.away_score} : {g.home_score}**", "종료"
         elif g.status == "LIVE":
-            score, status = f"{g.away_score or 0}:{g.home_score or 0}", "경기중"
+            score, status = f"**{g.away_score or 0} : {g.home_score or 0}**", "_경기 중_"
         else:
-            score, status = "—", "예정"
+            score, status = "vs", "예정"
         time_label = g.game_time or "—"
-        # ⭐ 마커는 1 char, 응원팀이 아닐 땐 공백 1 char로 같은 자리 차지
-        away_marker = "⭐" if g.away_code in TARGET_TEAMS else " "
-        home_marker = "⭐" if g.home_code in TARGET_TEAMS else " "
-        cells = [
-            _pad_chars(time_label, N_TIME),
-            _pad_chars(f"{away_marker}{g.away_name}", N_TEAM),
-            _pad_chars(score, N_SCORE),
-            _pad_chars(f"{home_marker}{g.home_name}", N_TEAM),
-            _pad_chars(g.stadium, N_STADIUM),
-            _pad_chars(status, N_STATUS),
-        ]
-        parts.append(" | ".join(cells))
-    parts.append("```")
+        away_marker = "⭐" if g.away_code in TARGET_TEAMS else ""
+        home_marker = "⭐" if g.home_code in TARGET_TEAMS else ""
+        away_label = f"{away_marker}{g.away_name}"
+        home_label = f"{home_marker}{g.home_name}"
+        # blockquote (>) 로 한 경기를 시각적 묶음 처리
+        parts.append(
+            f"> :baseball: **{time_label}** · "
+            f"{away_label} {score} {home_label}  \n"
+            f"> :round_pushpin: {g.stadium} · {status}\n"
+        )
     return "\n".join(parts) + "\n"
 
 
@@ -268,34 +253,18 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     """
     parts = ["## :bar_chart: KBO 팀 순위"]
 
-    # Char count 기준 컬럼 폭. 팀명: ⭐(1) + 한글 7자 = 8.
-    # 숫자 컬럼은 최대 자릿수 (예: 144=3, 0.692=5, 9.0=3, 2승=2).
-    N_RANK, N_TEAM, N_G, N_W, N_D, N_L = 4, 8, 4, 3, 3, 3
-    N_PCT, N_GB, N_STREAK = 5, 5, 4
-
-    parts.append("```")
-    headers = ["순위", "팀", "경기", "승", "무", "패", "승률", "게임차", "연속"]
-    sizes = [N_RANK, N_TEAM, N_G, N_W, N_D, N_L, N_PCT, N_GB, N_STREAK]
-    parts.append(" | ".join(_pad_chars(h, n) for h, n in zip(headers, sizes)))
-    total_chars = sum(sizes) + 3 * (len(sizes) - 1)
-    parts.append("─" * total_chars)
-
+    # 카드 형태 — 팀당 2줄.
+    # 1줄: 순위. 팀명 (이번주 연속 + 응원팀 ⭐) — 승률
+    # 2줄: 경기 W승 D무 L패 · 게임차 N
     for s in standings:
-        marker = "⭐" if s.team_code in TARGET_TEAMS else " "
-        gb = "—" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}"
-        cells = [
-            _pad_chars(str(s.ranking), N_RANK),
-            _pad_chars(f"{marker}{s.team_name}", N_TEAM),
-            _pad_chars(str(s.games), N_G),
-            _pad_chars(str(s.wins), N_W),
-            _pad_chars(str(s.draws), N_D),
-            _pad_chars(str(s.losses), N_L),
-            _pad_chars(f"{s.win_rate:.3f}", N_PCT),
-            _pad_chars(gb, N_GB),
-            _pad_chars(s.streak, N_STREAK),
-        ]
-        parts.append(" | ".join(cells))
-    parts.append("```")
+        marker = "⭐ " if s.team_code in TARGET_TEAMS else ""
+        gb = "1위" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}경기차"
+        # 1위는 게임차 대신 "1위" 라벨
+        parts.append(
+            f"> **{s.ranking}위 · {marker}{s.team_name}** — 승률 **{s.win_rate:.3f}**  \n"
+            f"> {s.games}경기 · {s.wins}승 {s.draws}무 {s.losses}패 · "
+            f"{gb} · 연속 {s.streak}\n"
+        )
 
     # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
     target_recents = [s for s in standings if s.team_code in TARGET_TEAMS]
