@@ -252,6 +252,29 @@ def cmd_update(args) -> None:
         print(f"✓ inserted chunk {i}/{len(chunks)} ({len(chunk)} chars)")
     print("✓ canvas refreshed")
 
+    # [DIAG] insert 끝난 후 raw lookup 응답 dump.
+    # 빈 표 컨테이너가 어떤 section_type / 어떤 ID 패턴으로 잡히는지 확인.
+    import json as _json
+    print("[DIAG raw] === after-insert raw lookup ===", flush=True)
+    for crit_label, crit in [
+        ("any_header", {"section_types": ["any_header"]}),
+        ("h1", {"section_types": ["h1"]}),
+        ("h2", {"section_types": ["h2"]}),
+        ("h3", {"section_types": ["h3"]}),
+    ]:
+        try:
+            data = slack._post(
+                "canvases.sections.lookup",
+                {"canvas_id": canvas_id, "criteria": crit},
+            )
+            sections = data.get("sections") or []
+            print(f"[DIAG raw] {crit_label}: {len(sections)} sections", flush=True)
+            # 처음 3개 섹션 raw json 그대로
+            for s in sections[:3]:
+                print(f"  {_json.dumps(s, ensure_ascii=False)}", flush=True)
+        except Exception as e:
+            print(f"[DIAG raw] {crit_label}: ERR {str(e)[:200]}", flush=True)
+
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
         slack.rename(canvas_id, CANVAS_TITLE)
