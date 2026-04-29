@@ -85,7 +85,8 @@ class SlackCanvasClient:
     def list_all_sections(self, canvas_id: str) -> list[str]:
         """Canvas에 존재하는 모든 섹션의 ID를 반환합니다.
 
-        section_types로 헤딩/텍스트를 모두 잡아 사실상 전체 섹션을 가져옵니다.
+        Slack API는 criteria.section_types에 최대 3개까지만 허용하므로
+        any_header + any_text만으로 헤딩과 텍스트 섹션을 모두 잡습니다.
         앵커 누적 문제를 피하기 위해 wipe-and-refill 흐름에서 사용합니다.
         """
         data = self._post(
@@ -93,13 +94,7 @@ class SlackCanvasClient:
             {
                 "canvas_id": canvas_id,
                 "criteria": {
-                    "section_types": [
-                        "h1",
-                        "h2",
-                        "h3",
-                        "any_header",
-                        "any_text",
-                    ],
+                    "section_types": ["any_header", "any_text"],
                 },
             },
         )
