@@ -204,9 +204,6 @@ def cmd_update(args) -> None:
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
 
-    # [DIAG-ONLY] 본문 read 가능한 메서드 + 추가 section_types enum probe
-    slack.debug_probe_methods(canvas_id, label="phase2")
-
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
         slack.rename(canvas_id, CANVAS_TITLE)
