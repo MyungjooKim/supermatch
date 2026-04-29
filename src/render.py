@@ -235,3 +235,88 @@ def render_full_standings(date: dt.date, standings: list[TeamStanding]) -> str:
         render_standings_table(standings),
         render_footer(),
     ])
+
+
+# ============================================================
+# 시즌 단계별 화면 (Plan: docs/01-plan/supermatch-season-states.md)
+# ============================================================
+
+def render_offseason_before(date: dt.date, last_year: int, last_year_stats: list[TeamStanding]) -> str:
+    """1월 ~ 시즌 시작 전: '오프시즌 — 작년(last_year) 최종 순위'."""
+    notice = (
+        f"## :snowflake: KBO 오프시즌\n"
+        f"> {date.year}년 정규시즌은 아직 시작 전입니다. "
+        f"아래는 {last_year}년 최종 순위입니다.\n"
+    )
+    table = render_standings_table(last_year_stats).replace(
+        "## :bar_chart: KBO 팀 순위",
+        f"## :bar_chart: {last_year}년 최종 순위",
+    )
+    return "\n".join([render_header(date), notice, table, render_footer()])
+
+
+def render_preseason(date: dt.date, last_year: int, last_year_stats: list[TeamStanding]) -> str:
+    """시범경기 기간: '시범경기 / 정규시즌 D-N + 작년 최종'."""
+    # 정규시즌 개막은 보통 3월 22~28일 사이로 가정 — 정확한 D-day는 일정 API로 보강 가능
+    notice = (
+        f"## :baseball: KBO 시범경기 기간\n"
+        f"> {date.year}년 정규시즌 개막을 앞두고 시범경기가 진행 중입니다. "
+        f"아래는 {last_year}년 최종 순위입니다.\n"
+    )
+    table = render_standings_table(last_year_stats).replace(
+        "## :bar_chart: KBO 팀 순위",
+        f"## :bar_chart: {last_year}년 최종 순위",
+    )
+    return "\n".join([render_header(date), notice, table, render_footer()])
+
+
+def render_offseason_after(date: dt.date, this_year: int, final_stats: list[TeamStanding]) -> str:
+    """시즌 종료 후 ~ 12월: '시즌 종료 — 올해 최종 순위'."""
+    notice = (
+        f"## :trophy: {this_year} KBO 시즌 종료\n"
+        f"> {this_year}년 KBO 시즌이 마무리되었습니다. 모든 팀과 팬들 수고 많으셨습니다.\n"
+        f"> 다음 시즌까지 잠시 휴식기를 가집니다.\n"
+    )
+    table = render_standings_table(final_stats).replace(
+        "## :bar_chart: KBO 팀 순위",
+        f"## :bar_chart: {this_year}년 최종 순위",
+    )
+    return "\n".join([render_header(date), notice, table, render_footer()])
+
+
+def render_postseason_top5(
+    date: dt.date,
+    games: list[Game],
+    top5: list[TeamStanding],
+) -> str:
+    """포스트시즌: 진출 5팀 강조 + 오늘 PO 경기.
+
+    KBO 포스트시즌은 정규시즌 1~5위가 진출:
+      와일드카드(4 vs 5) → 준PO(3 vs WC승자) → PO(2 vs 준PO승자) → 한국시리즈(1 vs PO승자)
+    """
+    notice = (
+        f"## :fire: KBO 포스트시즌 진행 중\n"
+        f"> 정규시즌이 마무리되고 가을 야구가 한창입니다. "
+        f"한국시리즈 진출을 향한 5팀의 여정을 응원해주세요.\n"
+    )
+
+    # 5팀 표 (응원팀 강조는 render_standings_table 그대로 활용)
+    table_full = render_standings_table(top5)
+    table = table_full.replace(
+        "## :bar_chart: KBO 팀 순위",
+        "## :star: 포스트시즌 진출 5팀",
+    )
+
+    # 오늘 PO 경기
+    if games:
+        schedule_section = render_schedule_table(date, games).replace(
+            "## :clipboard: 오늘의 전체 일정",
+            "## :clipboard: 오늘의 포스트시즌 경기",
+        )
+    else:
+        schedule_section = (
+            "## :clipboard: 오늘의 포스트시즌 경기\n"
+            "> 오늘은 포스트시즌 경기가 없습니다. 다음 경기를 기다려요.\n"
+        )
+
+    return "\n".join([render_header(date), notice, table, schedule_section, render_footer()])

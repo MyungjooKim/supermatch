@@ -12,6 +12,7 @@ KBO Canvas updater 메인 엔트리포인트.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import os
 import sys
 
@@ -25,7 +26,15 @@ from naver_kbo import (
     fetch_team_stats,
     today_kst,
 )
-from render import render_full_canvas, render_full_standings
+from render import (
+    render_full_canvas,
+    render_full_standings,
+    render_offseason_after,
+    render_offseason_before,
+    render_postseason_top5,
+    render_preseason,
+)
+from season_stage import RealFetcher, SeasonStage, detect_season_stage
 from slack_canvas import SlackCanvasClient
 from summarize import no_game_message, summarize_game_for_team
 
@@ -56,19 +65,49 @@ def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str,
     return out
 
 
-def cmd_init(args) -> None:
-    """최초 Canvas 생성. 출력된 canvas_id를 안전한 곳에 저장하세요."""
-    date = today_kst()
-    games = fetch_schedule(date)
+def build_canvas_markdown(date: dt.date) -> str:
+    """오늘의 시즌 단계를 판정하고 적절한 Canvas 본문 markdown을 반환합니다.
 
+    init/update 양쪽에서 공유. 5단계 분기:
+      OFFSEASON_BEFORE / PRESEASON: 작년 최종 순위
+      REGULAR_SEASON + 경기있음: GAMES 화면
+      REGULAR_SEASON + 경기없음: 진행 중 순위
+      POSTSEASON: 진출 5팀 + 오늘 PO 경기
+      OFFSEASON_AFTER: 올해 최종 순위
+    """
+    games = fetch_schedule(date)
+    stage = detect_season_stage(date, RealFetcher())
+    print(f"[stage] {date} → {stage.value} (games today: {len(games)})")
+
+    if stage in (SeasonStage.OFFSEASON_BEFORE, SeasonStage.PRESEASON):
+        last_year = date.year - 1
+        last_year_stats = fetch_team_stats(last_year)
+        if stage == SeasonStage.PRESEASON:
+            return render_preseason(date, last_year, last_year_stats)
+        return render_offseason_before(date, last_year, last_year_stats)
+
+    if stage == SeasonStage.OFFSEASON_AFTER:
+        final_stats = fetch_team_stats(date.year)
+        return render_offseason_after(date, date.year, final_stats)
+
+    if stage == SeasonStage.POSTSEASON:
+        standings = fetch_team_stats(date.year)
+        top5 = standings[:5]
+        return render_postseason_top5(date, games, top5)
+
+    # REGULAR_SEASON
     if games:
         claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         summaries = build_summaries(games, claude)
-        markdown = render_full_canvas(date, games, summaries)
-    else:
-        standings = fetch_team_stats(date.year)
-        markdown = render_full_standings(date, standings)
+        return render_full_canvas(date, games, summaries)
+    standings = fetch_team_stats(date.year)
+    return render_full_standings(date, standings)
 
+
+def cmd_init(args) -> None:
+    """최초 Canvas 생성. 출력된 canvas_id를 안전한 곳에 저장하세요."""
+    date = today_kst()
+    markdown = build_canvas_markdown(date)
     slack = SlackCanvasClient()
     canvas_id = slack.create_canvas(CANVAS_TITLE, markdown, channel_id=args.channel)
     print(f"CANVAS_ID={canvas_id}")
@@ -89,18 +128,7 @@ def cmd_update(args) -> None:
     """
     canvas_id = args.canvas_id or os.environ["SLACK_CANVAS_ID"]
     date = today_kst()
-    games = fetch_schedule(date)
-
-    if games:
-        # 경기 있는 날 — 기존 화면 (헤더 / 응원팀 카드 / 일정표 / 푸터)
-        claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        summaries = build_summaries(games, claude)
-        markdown = render_full_canvas(date, games, summaries)
-    else:
-        # 경기 없는 날 — 시즌 팀 순위 화면
-        # 시즌 단계 정교화(요건 4: 비시즌 → 작년 최종 순위)는 다음 step에서 처리
-        standings = fetch_team_stats(date.year)
-        markdown = render_full_standings(date, standings)
+    markdown = build_canvas_markdown(date)
 
     # 본문 텍스트 섹션 매칭용 anchor — 우리가 렌더링하는 본문에 자주 등장하는 단어들.
     # any_header가 잡지 못하는 본문 텍스트 섹션을 contains_text로 보완 매칭합니다.
