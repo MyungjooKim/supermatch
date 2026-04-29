@@ -1,0 +1,31 @@
+name: Simulate Season Branches
+
+# Plan: docs/01-plan/supermatch-season-states.md
+# Run the season-stage simulator on every push/PR to main.
+# Catches regressions in detect_season_stage logic before they hit production.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/season_stage.py"
+      - "tools/simulate_branches.py"
+      - ".github/workflows/simulate-branches.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/season_stage.py"
+      - "tools/simulate_branches.py"
+  workflow_dispatch:
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run simulator
+        run: PYTHONPATH=src python3 tools/simulate_branches.py
