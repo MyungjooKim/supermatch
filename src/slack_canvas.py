@@ -162,40 +162,6 @@ class SlackCanvasClient:
             },
         )
 
-    def debug_dump_sections(self, canvas_id: str, label: str = "") -> None:
-        """[DIAG-ONLY] Slack이 캔버스를 어떻게 섹션화했는지 raw 응답을 그대로 출력.
-
-        실제 운영 코드가 아닙니다. 빈 표 버그 진단용으로 추가했고
-        원인 파악 후 즉시 제거 예정.
-        """
-        import json as _json
-        import sys as _sys
-        # stdout으로 출력 + 즉시 flush. GH Actions log 순서가 보장되도록.
-        for criteria_label, criteria in [
-            ("any_header", {"section_types": ["any_header"]}),
-            ("h1", {"section_types": ["h1"]}),
-            ("h2", {"section_types": ["h2"]}),
-            ("h3", {"section_types": ["h3"]}),
-            ("contains_홈", {"contains_text": "홈"}),
-            ("contains_시간", {"contains_text": "시간"}),
-            ("contains_원정", {"contains_text": "원정"}),
-            ("contains_점수", {"contains_text": "점수"}),
-            ("contains_예정", {"contains_text": "예정"}),
-            ("contains_KBO", {"contains_text": "KBO"}),
-        ]:
-            try:
-                data = self._post(
-                    "canvases.sections.lookup",
-                    {"canvas_id": canvas_id, "criteria": criteria},
-                )
-                sections = data.get("sections") or []
-                print(f"[DIAG {label}] {criteria_label}: {len(sections)} sections", flush=True)
-                for s in sections[:20]:
-                    print(f"  - {_json.dumps(s, ensure_ascii=False)[:300]}", flush=True)
-            except Exception as e:
-                print(f"[DIAG {label}] {criteria_label}: ERROR {e}", flush=True)
-        _sys.stdout.flush()
-
     def insert_at_end(self, canvas_id: str, markdown: str) -> None:
         """본문 끝에 markdown을 삽입합니다. 비어있는 Canvas를 채울 때 사용."""
         self._post(

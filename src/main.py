@@ -145,6 +145,8 @@ def cmd_update(args) -> None:
         "시간",          # 일정표 헤더
         "점수",          # 일정표 헤더
         "상태",          # 일정표 헤더
+        "홈",            # 일정표 헤더 — 빠뜨리면 빈 placeholder 표가 잔존
+        "구장",          # 일정표 헤더 (위에 이미 있지만 명시)
         "잠실",          # 구장
         "고척",
         "사직",
@@ -201,10 +203,6 @@ def cmd_update(args) -> None:
     # 2) 새 본문 삽입
     slack.insert_at_end(canvas_id, markdown)
     print("✓ canvas refreshed")
-
-    # [DIAG-ONLY] 빈 표 버그 진단용. Slack이 우리 마크다운을 어떻게 섹션화했는지 확인.
-    # 원인 확인 후 즉시 제거.
-    slack.debug_dump_sections(canvas_id, label="after-insert")
 
     # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
     try:
