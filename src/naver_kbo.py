@@ -177,21 +177,13 @@ def fetch_schedule(date: dt.date) -> list[Game]:
     games_raw = (payload.get("result") or {}).get("games") or []
     games: list[Game] = []
     for g in games_raw:
-        # Naver는 reversedHomeAway=True일 때 home/away 필드를 표시 우선순위로 뒤집어 둡니다.
-        # 우리는 항상 "실제 홈/원정" 기준으로 저장합니다.
-        reversed_ha = bool(g.get("reversedHomeAway"))
-
-        api_home_code = g.get("homeTeamCode", "")
-        api_away_code = g.get("awayTeamCode", "")
-        api_home_score = g.get("homeTeamScore")
-        api_away_score = g.get("awayTeamScore")
-
-        if reversed_ha:
-            home_code, away_code = api_away_code, api_home_code
-            home_score, away_score = api_away_score, api_home_score
-        else:
-            home_code, away_code = api_home_code, api_away_code
-            home_score, away_score = api_home_score, api_away_score
+        # reversedHomeAway 필드는 무시합니다.
+        # 실측 결과: homeTeamCode/awayTeamCode는 reversedHomeAway 값과 무관하게
+        # 항상 실제 홈/원정 기준으로 일관되게 내려옵니다 (game_id 앞 팀이 홈팀).
+        home_code = g.get("homeTeamCode", "")
+        away_code = g.get("awayTeamCode", "")
+        home_score = g.get("homeTeamScore")
+        away_score = g.get("awayTeamScore")
 
         raw_status = g.get("statusCode") or g.get("gameStatusCode") or "READY"
         status = STATUS_MAP.get(raw_status, "BEFORE")
@@ -217,18 +209,10 @@ def fetch_schedule(date: dt.date) -> list[Game]:
     return games
 
 
-def fetch_starting_pitchers(game_id: str, true_home_code: str) -> dict[str, str]:
-    """경기의 선발투수 이름을 *실제* home/away 기준으로 반환.
-
-    Args:
-        game_id: 경기 ID
-        true_home_code: 우리가 정규화한 실제 홈팀 코드 (Game.home_code).
-            preview 응답의 hCode가 이것과 다르면 home/away가 뒤집혀 있는 것이므로 swap.
+def fetch_starting_pitchers(game_id: str, true_home_code: str = "") -> dict[str, str]:
+    """경기의 선발투수 이름을 home/away 기준으로 반환.
 
     Returns: {"home": "투수명", "away": "투수명"} — 발표 안 된 쪽은 키 없음.
-
-    Naver preview 응답의 homeStarter/awayStarter는 표시 우선순위 기준이라
-    실제 홈/원정과 뒤집혀 있을 수 있습니다 (schedule API의 reversedHomeAway와 동일).
     """
     url = f"{BASE}/schedule/games/{game_id}/preview"
     try:
@@ -239,23 +223,15 @@ def fetch_starting_pitchers(game_id: str, true_home_code: str) -> dict[str, str]
     except Exception:
         return {}
 
-    gi = pd.get("gameInfo") or {}
-    api_home_code = gi.get("hCode") or ""
-
-    api_home_name = ((pd.get("homeStarter") or {}).get("playerInfo") or {}).get("name") or ""
-    api_away_name = ((pd.get("awayStarter") or {}).get("playerInfo") or {}).get("name") or ""
-
-    # preview의 hCode가 우리 정규화된 home과 다르면 뒤집혀 있는 것
-    if api_home_code and api_home_code != true_home_code:
-        real_home, real_away = api_away_name, api_home_name
-    else:
-        real_home, real_away = api_home_name, api_away_name
+    # homeStarter/awayStarter는 homeTeamCode 기준과 동일하게 실제 홈/원정 순서로 내려옵니다.
+    home_name = ((pd.get("homeStarter") or {}).get("playerInfo") or {}).get("name") or ""
+    away_name = ((pd.get("awayStarter") or {}).get("playerInfo") or {}).get("name") or ""
 
     out: dict[str, str] = {}
-    if real_home:
-        out["home"] = real_home
-    if real_away:
-        out["away"] = real_away
+    if home_name:
+        out["home"] = home_name
+    if away_name:
+        out["away"] = away_name
     return out
 
 
