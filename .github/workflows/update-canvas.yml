@@ -10,12 +10,19 @@ on:
     #   08:07 — 새 하루 시작. 어제 결과는 잠시 더 보이고 오늘 일정으로 전환
     #   17:13 — 주중경기 시작 직전, 주말경기 17시 시작 직전. 선발투수 거의 확정
     #   20:17 — 모든 경기 진행 중. 점수 + 진행 상태 표시
-    #   23:37 — 거의 모든 경기 종료. 최종 결과 + 응원팀 1~2줄 요약
+    #   23:37 — 거의 모든 경기 종료. 최종 결과 + 응원팀 1~2줄 요약 + state 저장
     - cron: "7 23 * * *"   # KST 08:07 (UTC 23:07, 전날)
     - cron: "13 8 * * *"   # KST 17:13 (UTC 08:13)
     - cron: "17 11 * * *"  # KST 20:17 (UTC 11:17)
-    - cron: "37 14 * * *"  # KST 23:37 (UTC 14:37)
+    - cron: "37 14 * * *"  # KST 23:37 (UTC 14:37) ← final run
   workflow_dispatch:        # 수동 실행 (Slack Canvas footer 링크에서 클릭)
+    inputs:
+      is_final_run:
+        description: "어제 경기 요약을 Claude로 생성하고 저장 (23:37 실행과 동일)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 concurrency:
   group: kbo-canvas
@@ -27,6 +34,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # state 파일 commit/push를 위해 write 권한 필요
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -41,4 +51,22 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CANVAS_ID: ${{ secrets.SLACK_CANVAS_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # 23:37 cron이거나 수동으로 final_run을 선택한 경우 true
+          IS_FINAL_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '37 14 * * *' && 'true' || inputs.is_final_run || 'false' }}
         run: python src/main.py update
+
+      - name: Save summary state
+        # IS_FINAL_RUN일 때만 state 파일이 생성됨 — 변경 없으면 자동 스킵
+        if: env.IS_FINAL_RUN == 'true'
+        env:
+          IS_FINAL_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '37 14 * * *' && 'true' || inputs.is_final_run || 'false' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/yesterday_summary.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "no state change, skipping commit"
+          else
+            git commit -m "chore: save yesterday summary state [skip ci]"
+            git push
+          fi

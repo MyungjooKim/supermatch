@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 
@@ -44,28 +45,85 @@ from summarize import no_game_message, summarize_game_for_team
 # rename operation에서도 markdown으로 받기 때문에 init/update가 동일하게 사용.
 CANVAS_TITLE = ":baseball: 오늘의 KBO :baseball:"
 
+# 어제 경기 요약을 저장하는 파일 (23:37 실행이 저장, 이후 실행이 읽음)
+SUMMARY_STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "state", "yesterday_summary.json")
+
+
+def _load_summary_state() -> dict:
+    """저장된 어제 경기 요약을 읽습니다. 없거나 파싱 실패 시 빈 dict."""
+    try:
+        with open(SUMMARY_STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_summary_state(date: dt.date, summaries: dict[str, str]) -> None:
+    """어제 경기 요약을 JSON 파일에 저장합니다."""
+    os.makedirs(os.path.dirname(SUMMARY_STATE_PATH), exist_ok=True)
+    payload = {"date": date.isoformat(), "summaries": summaries}
+    with open(SUMMARY_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"✓ summary state saved: {date} → {list(summaries.keys())}")
+
+
+def _make_score_fallback(game: "Game", code: str) -> str:
+    """box score 없이 스코어+승패만으로 한 줄 요약을 만듭니다."""
+    from naver_kbo import TEAM_NAME
+    opp = game.opponent_of(code)
+    my = game.score_for(code)
+    op = game.score_for(opp)
+    won = game.winner_code() == code
+    drew = game.winner_code() is None
+    verdict = "무승부" if drew else ("승리" if won else "패배")
+    return f"{TEAM_NAME.get(opp, opp)}전 {my}-{op} {verdict}."
+
+
+def _build_fresh_summaries(
+    yesterday: dt.date, games: list["Game"], claude: anthropic.Anthropic
+) -> dict[str, str]:
+    """어제 경기를 Claude로 요약합니다. box score가 없으면 스코어 폴백."""
+    out: dict[str, str] = {}
+    for code in ("LG", "SS", "LT"):
+        game = next((g for g in games if g.involves(code)), None)
+        if game is None or not game.is_finished:
+            continue
+        try:
+            box = fetch_box_score(game.game_id)
+        except Exception as e:
+            print(f"[warn] box score fetch failed for {code}: {e}", file=sys.stderr)
+            box = {}
+        if not box or not any(box.get(k) for k in ("scoreboard", "batters", "pitchers")):
+            out[code] = _make_score_fallback(game, code)
+            continue
+        try:
+            out[code] = summarize_game_for_team(game, box, code, claude)
+        except Exception as e:
+            print(f"[warn] summary failed for {code}: {e}", file=sys.stderr)
+            out[code] = _make_score_fallback(game, code)
+    return out
+
 
 def build_yesterday_summaries(
-    today: dt.date, stage: "SeasonStage", claude: anthropic.Anthropic
+    today: dt.date, stage: "SeasonStage", claude: anthropic.Anthropic, *, is_final_run: bool = False
 ) -> dict[str, str] | None:
     """어제 경기 결과 한 줄 요약을 반환합니다.
 
     반환값:
-    - None: 섹션 자체를 숨겨야 하는 경우 (포스트시즌에서 우리 팀 경기 없음 등)
-    - {}: 어제 경기 데이터가 없거나 결과 미확정인 경우 (빈 dict → 섹션 표시 생략)
+    - None: 섹션 자체를 숨겨야 하는 경우
+    - {}: 어제 경기 데이터 없음 (섹션 표시 생략)
     - {"LG": "...", ...}: 팀별 요약
 
-    포스트시즌에서 우리 팀(LG/삼성/롯데) 3팀 모두 어제 경기가 없으면 None을 반환해
-    "우리 팀 어제 경기 결과" 섹션 전체를 숨깁니다.
+    is_final_run=True (23:37 실행): 당일 경기가 막 끝난 직후라 box score API가
+    살아있음 → Claude 요약 생성 후 state 파일에 저장.
+    is_final_run=False (나머지 실행): state 파일에서 읽음. 파일 없으면 스코어 폴백.
     """
     from season_stage import SeasonStage
 
-    yesterday = today - dt.timedelta(days=1)
-
-    # 포스트시즌/오프시즌은 원칙적으로 정규시즌 요약이 무의미
-    # 다만 POSTSEASON 중 우리 팀 경기가 있으면 보여줌
     if stage in (SeasonStage.OFFSEASON_BEFORE, SeasonStage.PRESEASON, SeasonStage.OFFSEASON_AFTER):
         return None
+
+    yesterday = today - dt.timedelta(days=1)
 
     try:
         yest_games = fetch_schedule(yesterday)
@@ -73,44 +131,27 @@ def build_yesterday_summaries(
         print(f"[warn] yesterday schedule fetch failed: {e}", file=sys.stderr)
         return {}
 
-    # 우리 팀이 어제 포스트시즌 경기에 참여했는지 확인
     if stage == SeasonStage.POSTSEASON:
         our_games = [g for g in yest_games if any(g.involves(c) for c in ("LG", "SS", "LT"))]
         if not our_games:
-            return None  # 우리 팀 모두 탈락 → 섹션 숨김
+            return None
 
-    out: dict[str, str] = {}
-    for code in ("LG", "SS", "LT"):
-        game = next((g for g in yest_games if g.involves(code)), None)
-        if game is None or not game.is_finished:
-            continue
-        try:
-            box = fetch_box_score(game.game_id)
-        except Exception as e:
-            print(f"[warn] yesterday box score fetch failed for {code}: {e}", file=sys.stderr)
-            box = {}
+    if is_final_run:
+        # 23:37 실행: 경기 직후라 box score 살아있음 → Claude 요약 + 저장
+        out = _build_fresh_summaries(yesterday, yest_games, claude)
+        if out:
+            _save_summary_state(yesterday, out)
+        return out
 
-        # box score가 비어 있으면 Claude 호출 없이 스코어 기반 폴백
-        if not box or not any(box.get(k) for k in ("scoreboard", "batters", "pitchers")):
-            from naver_kbo import TEAM_NAME
-            opp = game.opponent_of(code)
-            my = game.score_for(code)
-            op = game.score_for(opp)
-            won = game.winner_code() == code
-            drew = game.winner_code() is None
-            verdict = "무승부" if drew else ("승리" if won else "패배")
-            opp_name = TEAM_NAME.get(opp, opp)
-            out[code] = f"{opp_name}전 {my}-{op} {verdict}."
-            continue
+    # 08:07 / 17:13 / 20:17 실행: 저장된 파일에서 읽음
+    state = _load_summary_state()
+    if state.get("date") == yesterday.isoformat() and state.get("summaries"):
+        print(f"✓ loaded yesterday summary from state file ({yesterday})")
+        return state["summaries"]
 
-        try:
-            out[code] = summarize_game_for_team(game, box, code, claude)
-        except Exception as e:
-            print(f"[warn] yesterday summary failed for {code}: {e}", file=sys.stderr)
-            opp = game.opponent_of(code)
-            out[code] = f"{game.score_for(code)} - {game.score_for(opp)}로 경기를 마쳤습니다."
-
-    return out
+    # 파일 없거나 날짜 불일치 → 스코어 폴백 (Claude 없이)
+    print("[warn] no saved summary state, falling back to score-only", file=sys.stderr)
+    return _build_fresh_summaries(yesterday, yest_games, claude)
 
 
 def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str, str]:
@@ -133,6 +174,17 @@ def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str,
             opp = game.opponent_of(code)
             out[code] = f"{game.score_for(code)} - {game.score_for(opp)}로 경기를 마쳤습니다."
     return out
+
+
+def _is_final_run() -> bool:
+    """23:37 KST 실행 여부 — 환경변수 또는 현재 시각으로 판단."""
+    if os.environ.get("IS_FINAL_RUN", "").lower() in ("1", "true", "yes"):
+        return True
+    from naver_kbo import KST
+    import datetime as dt
+    now = dt.datetime.now(KST)
+    # 23:30~23:59 범위를 final run으로 간주
+    return now.hour == 23 and now.minute >= 30
 
 
 def build_canvas_chunks(date: dt.date) -> list[str]:
@@ -171,7 +223,9 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
 
     # 어제 경기 결과 요약 (None = 섹션 숨김, {} = 결과 없음)
     yesterday = date - dt.timedelta(days=1)
-    yest_summaries = build_yesterday_summaries(date, stage, claude)
+    final_run = _is_final_run()
+    print(f"[yesterday] is_final_run={final_run}")
+    yest_summaries = build_yesterday_summaries(date, stage, claude, is_final_run=final_run)
     yest_chunk = ""
     if yest_summaries is not None:
         yest_chunk = render_yesterday_summary(yesterday, yest_summaries)
