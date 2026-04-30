@@ -211,6 +211,28 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
 MANUAL_UPDATE_URL = "https://github.com/MyungjooKim/supermatch/actions/workflows/update-canvas.yml"
 
 
+def render_yesterday_summary(yesterday: dt.date, summaries: dict[str, str]) -> str:
+    """어제 우리 팀 경기 결과 요약 섹션.
+
+    summaries가 비어 있으면 (결과 없음 / 경기 없음) 빈 문자열 반환.
+    호출 측에서 None 체크 후 이 함수를 호출하므로, None은 여기서 처리하지 않음.
+    """
+    if not summaries:
+        return ""
+
+    month = yesterday.month
+    day = yesterday.day
+    parts = [f"## :rewind: 우리 팀 어제 경기 결과 ({month}/{day})"]
+    for code in ("LG", "SS", "LT"):
+        text = summaries.get(code)
+        if not text:
+            continue
+        emoji = TEAM_EMOJI.get(code, ":baseball:")
+        name = TEAM_NAME.get(code, code)
+        parts.append(f"> {emoji} **{name}**: {text}")
+    return "\n".join(parts) + "\n"
+
+
 def render_footer() -> str:
     # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
     # KST로 표기하므로 KST tz를 명시합니다.

@@ -34,6 +34,7 @@ from render import (
     render_offseason_before,
     render_postseason_top5,
     render_preseason,
+    render_yesterday_summary,
 )
 from season_stage import RealFetcher, SeasonStage, detect_season_stage
 from slack_canvas import SlackCanvasClient
@@ -42,6 +43,56 @@ from summarize import no_game_message, summarize_game_for_team
 # Canvas title — markdown 포맷. :baseball: shortcode가 ⚾로 변환됩니다.
 # rename operation에서도 markdown으로 받기 때문에 init/update가 동일하게 사용.
 CANVAS_TITLE = ":baseball: 오늘의 KBO :baseball:"
+
+
+def build_yesterday_summaries(
+    today: dt.date, stage: "SeasonStage", claude: anthropic.Anthropic
+) -> dict[str, str] | None:
+    """어제 경기 결과 한 줄 요약을 반환합니다.
+
+    반환값:
+    - None: 섹션 자체를 숨겨야 하는 경우 (포스트시즌에서 우리 팀 경기 없음 등)
+    - {}: 어제 경기 데이터가 없거나 결과 미확정인 경우 (빈 dict → 섹션 표시 생략)
+    - {"LG": "...", ...}: 팀별 요약
+
+    포스트시즌에서 우리 팀(LG/삼성/롯데) 3팀 모두 어제 경기가 없으면 None을 반환해
+    "우리 팀 어제 경기 결과" 섹션 전체를 숨깁니다.
+    """
+    from season_stage import SeasonStage
+
+    yesterday = today - dt.timedelta(days=1)
+
+    # 포스트시즌/오프시즌은 원칙적으로 정규시즌 요약이 무의미
+    # 다만 POSTSEASON 중 우리 팀 경기가 있으면 보여줌
+    if stage in (SeasonStage.OFFSEASON_BEFORE, SeasonStage.PRESEASON, SeasonStage.OFFSEASON_AFTER):
+        return None
+
+    try:
+        yest_games = fetch_schedule(yesterday)
+    except Exception as e:
+        print(f"[warn] yesterday schedule fetch failed: {e}", file=sys.stderr)
+        return {}
+
+    # 우리 팀이 어제 포스트시즌 경기에 참여했는지 확인
+    if stage == SeasonStage.POSTSEASON:
+        our_games = [g for g in yest_games if any(g.involves(c) for c in ("LG", "SS", "LT"))]
+        if not our_games:
+            return None  # 우리 팀 모두 탈락 → 섹션 숨김
+
+    out: dict[str, str] = {}
+    for code in ("LG", "SS", "LT"):
+        game = next((g for g in yest_games if g.involves(code)), None)
+        if game is None or not game.is_finished:
+            continue
+        try:
+            box = fetch_box_score(game.game_id)
+            out[code] = summarize_game_for_team(game, box, code, claude)
+        except Exception as e:
+            print(f"[warn] yesterday summary failed for {code}: {e}", file=sys.stderr)
+            opp = game.opponent_of(code)
+            out[code] = f"{game.score_for(code)} - {game.score_for(opp)}로 경기를 마쳤습니다."
+
+    return out
 
 
 def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str, str]:
@@ -91,23 +142,35 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
         final_stats = fetch_team_stats(date.year)
         return [render_offseason_after(date, date.year, final_stats)]
 
+    from render import (
+        render_footer,
+        render_header,
+        render_schedule_table,
+        render_team_section,
+    )
+
+    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    # 어제 경기 결과 요약 (None = 섹션 숨김, {} = 결과 없음)
+    yesterday = date - dt.timedelta(days=1)
+    yest_summaries = build_yesterday_summaries(date, stage, claude)
+    yest_chunk = ""
+    if yest_summaries is not None:
+        yest_chunk = render_yesterday_summary(yesterday, yest_summaries)
+
     if stage == SeasonStage.POSTSEASON:
         standings = fetch_team_stats(date.year)
         top5 = standings[:5]
-        return [render_postseason_top5(date, games, top5)]
+        po_chunk = render_postseason_top5(date, games, top5)
+        if yest_chunk:
+            # render_postseason_top5에 이미 footer가 포함돼 있으므로
+            # footer 구분선("---") 직전에 어제 요약을 삽입합니다.
+            po_chunk = po_chunk.replace("\n---\n", f"\n{yest_chunk}\n---\n", 1)
+        return [po_chunk]
 
     # REGULAR_SEASON
     if games:
-        from render import (
-            render_footer,
-            render_header,
-            render_schedule_table,
-            render_team_section,
-        )
-
-        claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         summaries = build_summaries(games, claude)
-        # 응원팀 경기들의 선발투수 미리 fetch — 시작 전 카드에 (이름) 표기용
         starters_by_game: dict[str, dict[str, str]] = {}
         for code in ("LG", "SS", "LT"):
             tg = next((g for g in games if g.involves(code)), None)
@@ -115,14 +178,30 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
                 starters_by_game[tg.game_id] = fetch_starting_pitchers(
                     tg.game_id, tg.home_code
                 )
-        return [
+        chunks = [
             render_header(date),
             render_team_section(games, summaries, starters_by_game),
             render_schedule_table(date, games),
-            render_footer(),
         ]
+        if yest_chunk:
+            chunks.append(yest_chunk)
+        chunks.append(render_footer())
+        return chunks
+
     standings = fetch_team_stats(date.year)
-    return [render_full_standings(date, standings)]
+    chunks = [render_full_standings(date, standings)]
+    if yest_chunk:
+        # 경기 없는 날도 어제 요약 표시 — footer 직전에 삽입
+        # render_full_standings는 단일 문자열이므로 footer를 분리해 삽입
+        from render import render_footer as _rf, render_header as _rh, render_no_games_notice, render_standings_table
+        chunks = [
+            _rh(date),
+            render_no_games_notice(date),
+            render_standings_table(standings),
+            yest_chunk,
+            _rf(),
+        ]
+    return chunks
 
 
 def build_canvas_markdown(date: dt.date) -> str:
@@ -207,6 +286,7 @@ def cmd_update(args) -> None:
         # H1 헤더
         "우리 팀",
         "KBO",
+        "어제 경기 결과",  # render_yesterday_summary 섹션 앵커
     ]
 
     slack = SlackCanvasClient()
