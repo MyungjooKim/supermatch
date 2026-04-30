@@ -86,6 +86,24 @@ def build_yesterday_summaries(
             continue
         try:
             box = fetch_box_score(game.game_id)
+        except Exception as e:
+            print(f"[warn] yesterday box score fetch failed for {code}: {e}", file=sys.stderr)
+            box = {}
+
+        # box score가 비어 있으면 Claude 호출 없이 스코어 기반 폴백
+        if not box or not any(box.get(k) for k in ("scoreboard", "batters", "pitchers")):
+            from naver_kbo import TEAM_NAME
+            opp = game.opponent_of(code)
+            my = game.score_for(code)
+            op = game.score_for(opp)
+            won = game.winner_code() == code
+            drew = game.winner_code() is None
+            verdict = "무승부" if drew else ("승리" if won else "패배")
+            opp_name = TEAM_NAME.get(opp, opp)
+            out[code] = f"{opp_name}전 {my}-{op} {verdict}."
+            continue
+
+        try:
             out[code] = summarize_game_for_team(game, box, code, claude)
         except Exception as e:
             print(f"[warn] yesterday summary failed for {code}: {e}", file=sys.stderr)
