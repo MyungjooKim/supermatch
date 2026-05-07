@@ -21,11 +21,10 @@ from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, TeamStanding, is_monda
 WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
 TEAM_EMOJI = {
-    "LG": ":two_men_holding_hands:",  # LG 트윈스 어원 — 쌍둥이
-    "SS": ":lion_face:",
-    # `:seagull:`은 Slack 기본 emoji가 아니어서 텍스트로 노출됨.
-    # 워크스페이스에 custom `:seagull:`을 업로드하면 그걸로 바꿔도 됨.
-    "LT": ":bird:",
+    # 응원팀 3팀은 워크스페이스 custom emoji 사용 (parametacorp Slack에 등록됨)
+    "LG": ":lg_twins_2:",
+    "SS": ":blue_heart:",
+    "LT": ":lotte_giants:",
     "OB": ":bear:",
     "WO": ":eagle:",
     "SK": ":ship:",
