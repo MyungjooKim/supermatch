@@ -46,7 +46,7 @@ ANCHOR_FOOTER = "데이터: Naver 스포츠"
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
     return (
-        f"# :billed_cap: 우리 팀 오늘\n"
+        f"# :duck_wave01: 우리 팀 오늘\n"
         f"### {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
     )
 
