@@ -22,8 +22,8 @@ WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "
 
 TEAM_EMOJI = {
     # 응원팀 3팀은 워크스페이스 custom emoji 사용 (parametacorp Slack에 등록됨)
-    "LG": ":lg_twins_2:",
-    "SS": ":blue_heart:",
+    "LG": ":lg_lucky:",
+    "SS": ":sslion:",
     "LT": ":lotte_giant:",
     "OB": ":bear:",
     "WO": ":eagle:",
