@@ -242,8 +242,12 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
         po_chunk = render_postseason_top5(date, games, top5)
         if yest_chunk:
             # render_postseason_top5에 이미 footer가 포함돼 있으므로
-            # footer 구분선("---") 직전에 어제 요약을 삽입합니다.
-            po_chunk = po_chunk.replace("\n---\n", f"\n{yest_chunk}\n---\n", 1)
+            # footer(":wrench: 관리자 도구") 직전에 어제 요약을 삽입합니다.
+            footer_anchor = ":wrench: **관리자 도구**"
+            if footer_anchor in po_chunk:
+                po_chunk = po_chunk.replace(footer_anchor, f"{yest_chunk}\n{footer_anchor}", 1)
+            else:
+                po_chunk = po_chunk + "\n" + yest_chunk
         return [po_chunk]
 
     # REGULAR_SEASON

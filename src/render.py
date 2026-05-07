@@ -235,9 +235,13 @@ def render_yesterday_summary(yesterday: dt.date, summaries: dict[str, str]) -> s
 def render_footer() -> str:
     # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
     # KST로 표기하므로 KST tz를 명시합니다.
+    #
+    # 주의: 마크다운 `---` 수평선은 Slack Canvas에서 텍스트 없는 별도 섹션이 되어
+    # wipe anchor에 매칭되지 않고 누적됩니다. 따라서 수평선은 사용하지 않고
+    # 빈 줄로만 시각적 분리를 만듭니다.
     now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
-        f"---\n"
+        f"\n"
         f":wrench: **관리자 도구**: [GitHub에서 수동 실행]({MANUAL_UPDATE_URL}) "
         f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37\n"
         f"\n"
