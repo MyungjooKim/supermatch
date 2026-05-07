@@ -28,6 +28,10 @@ concurrency:
   group: kbo-canvas
   cancel-in-progress: false
 
+# state/yesterday_summary.json 파일 commit/push를 위해 write 권한 필요
+permissions:
+  contents: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
