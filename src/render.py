@@ -24,7 +24,7 @@ TEAM_EMOJI = {
     # 응원팀 3팀은 워크스페이스 custom emoji 사용 (parametacorp Slack에 등록됨)
     "LG": ":lg_twins_2:",
     "SS": ":blue_heart:",
-    "LT": ":lotte_giants:",
+    "LT": ":lotte_giant:",
     "OB": ":bear:",
     "WO": ":eagle:",
     "SK": ":ship:",
