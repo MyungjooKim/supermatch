@@ -73,13 +73,13 @@ def render_team_card(
     if game is None:
         # 경기 없는 날
         return (
-            f"### {emoji} {name}\n"
+            f"## {emoji} {name}\n"
             f"> _{summary}_\n"
         )
 
     if game.is_canceled:
         return (
-            f"### {emoji} {name}\n"
+            f"## {emoji} {name}\n"
             f"> 우천 등 사유로 경기 취소 ({game.stadium})\n"
         )
 
@@ -100,7 +100,7 @@ def render_team_card(
         when = game.game_time or "TBD"
         status_label = "경기 중" if game.status == "LIVE" else f"{when} 경기 예정"
         return (
-            f"### {emoji} {my_label}\n"
+            f"## {emoji} {my_label}\n"
             f"**vs {opp_label}** · {game.stadium} · {status_label}\n"
         )
 
@@ -115,7 +115,7 @@ def render_team_card(
         verdict_badge = "**패**"
 
     return (
-        f"### {emoji} {name} {verdict_badge}\n"
+        f"## {emoji} {name} {verdict_badge}\n"
         f"**{my_score} : {opp_score}** vs {opp} · {game.stadium}\n"
         f"> {summary}\n"
     )
