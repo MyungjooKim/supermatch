@@ -167,12 +167,18 @@ def build_summaries(games: list[Game], claude: anthropic.Anthropic) -> dict[str,
             continue
         try:
             box = fetch_box_score(game.game_id)
+        except Exception as e:
+            print(f"[warn] box score fetch failed for {code}: {e}", file=sys.stderr)
+            box = {}
+        # box score가 비어있으면 Claude 호출 없이 스코어 폴백
+        if not box or not any(box.get(k) for k in ("scoreboard", "batters", "pitchers", "etc_records")):
+            out[code] = _make_score_fallback(game, code)
+            continue
+        try:
             out[code] = summarize_game_for_team(game, box, code, claude)
         except Exception as e:
             print(f"[warn] summary failed for {code}: {e}", file=sys.stderr)
-            # 폴백: 스코어만으로 무미건조하게
-            opp = game.opponent_of(code)
-            out[code] = f"{game.score_for(code)} - {game.score_for(opp)}로 경기를 마쳤습니다."
+            out[code] = _make_score_fallback(game, code)
     return out
 
 

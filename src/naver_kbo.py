@@ -236,27 +236,36 @@ def fetch_starting_pitchers(game_id: str, true_home_code: str = "") -> dict[str,
 
 
 def fetch_box_score(game_id: str) -> dict[str, Any]:
-    """경기의 박스스코어 (이닝별 점수, 투수/타자 기록)를 가져옵니다.
+    """경기의 박스스코어 (이닝별 점수, 투수/타자 기록, 결승타 등)를 가져옵니다.
 
-    Claude API에 요약 요청할 때 컨텍스트로 들어갑니다.
+    Endpoint: /schedule/games/{id}/record (응답 result.recordData 안에 모든 정보).
+    이전엔 /game/{id}/record 를 호출했으나 404를 받았고, 이로 인해 Claude가
+    빈 박스스코어를 받아 영어로 거절하는 버그가 있었습니다.
+
+    Claude 요약에 핵심적인 필드만 추려 반환합니다.
     """
-    url = f"{BASE}/game/{game_id}/record"
+    url = f"{BASE}/schedule/games/{game_id}/record"
     resp = requests.get(url, headers=HEADERS, timeout=10)
     if resp.status_code != 200:
         return {}
-    data = resp.json().get("result") or {}
+    record = (resp.json().get("result") or {}).get("recordData") or {}
+    if not record:
+        return {}
 
-    # 응답에서 요약에 유용한 필드만 추려서 반환
+    # etcRecords: [{result, how}] — "박지훈(8회 1사 2,3루서 좌전 안타) 결승타" 같은 핵심 장면
+    # pitchingResult: [{name, w, l, s, wls}] — 승/패/세 투수
+    # scoreBoard: {rheb, inn} — 이닝별 점수
+    # pitchersBoxscore/battersBoxscore: 투수/타자별 상세 기록 (이닝별 타격 결과 포함)
+    # todayKeyStats: {away, home} - 팀별 안타/홈런/실책/도루 등 핵심 합계
     return {
-        "scoreboard": data.get("scoreBoard") or data.get("scoreboards") or [],
-        "batters": data.get("batters") or [],
-        "pitchers": data.get("pitchers") or [],
-        "etc": {
-            "winning_pitcher": data.get("wPitcherName"),
-            "losing_pitcher": data.get("lPitcherName"),
-            "save_pitcher": data.get("sPitcherName"),
-            "homeruns": data.get("homeRuns"),
-        },
+        "scoreboard": record.get("scoreBoard") or {},
+        "etc_records": record.get("etcRecords") or [],
+        "pitching_result": record.get("pitchingResult") or [],
+        "pitchers": record.get("pitchersBoxscore") or {},
+        "batters": record.get("battersBoxscore") or {},
+        "team_stats": record.get("todayKeyStats") or {},
+        "team_pitching": record.get("teamPitchingBoxscore") or {},
+        "game_info": record.get("gameInfo") or {},
     }
 
 

@@ -23,6 +23,62 @@ SYSTEM = (
 )
 
 
+def _compact_box(box: dict[str, Any], team_code: str, is_home_team: bool) -> dict[str, Any]:
+    """Claude에 보낼 box score 핵심 정보만 압축 — Naver record API 새 구조 기준."""
+    side = "home" if is_home_team else "away"
+    opp_side = "away" if is_home_team else "home"
+
+    # etcRecords: 결승타/홈런/연속안타 등 핵심 장면 (가장 가치 높음)
+    etc = box.get("etc_records") or []
+
+    # pitchingResult: 승/패/세 투수
+    pitching_result = box.get("pitching_result") or []
+
+    # scoreBoard: 이닝별 점수 (역전/대량득점 시점 파악)
+    sb = box.get("scoreboard") or {}
+
+    # 우리 팀 타자 — 안타/타점 있는 선수만
+    batters_all = (box.get("batters") or {}).get(side) or []
+    key_batters = []
+    for b in batters_all:
+        hit = b.get("hit", 0) or 0
+        rbi = b.get("rbi", 0) or 0
+        hr = b.get("hr", 0) or 0
+        if hit > 0 or rbi > 0 or hr > 0:
+            key_batters.append({
+                "name": b.get("name") or b.get("playerName"),
+                "pos": b.get("pos"),
+                "hit": hit, "rbi": rbi, "hr": hr,
+                "run": b.get("run", 0),
+                "hra": b.get("hra"),
+            })
+
+    # 우리 팀 투수 — 모든 등판 투수
+    pitchers_all = (box.get("pitchers") or {}).get(side) or []
+    key_pitchers = []
+    for p in pitchers_all:
+        key_pitchers.append({
+            "name": p.get("name"),
+            "inn": p.get("inn"),
+            "er": p.get("er", 0),
+            "kk": p.get("kk", 0),
+            "hit": p.get("hit", 0),
+            "wls": p.get("wls", ""),
+            "era": p.get("era"),
+        })
+
+    return {
+        "score_by_inning": sb.get("inn"),
+        "rheb": sb.get("rheb"),
+        "key_moments": etc,
+        "decision_pitchers": pitching_result,
+        "our_batters": key_batters[:8],  # 너무 길면 잘라냄
+        "our_pitchers": key_pitchers,
+        "team_stats": (box.get("team_stats") or {}).get(side),
+        "opp_team_stats": (box.get("team_stats") or {}).get(opp_side),
+    }
+
+
 def summarize_game_for_team(
     game: Game,
     box: dict[str, Any],
@@ -47,6 +103,9 @@ def summarize_game_for_team(
     else:
         verdict = "패배"
 
+    is_home = team_code == game.home_code
+    compact = _compact_box(box, team_code, is_home)
+
     user_prompt = f"""다음은 {game.game_date} KBO 경기 데이터입니다.
 
 대상 팀: {team_name}
@@ -54,11 +113,12 @@ def summarize_game_for_team(
 스코어: {team_name} {my_score} - {opp_score} {opponent_name}
 결과: {verdict}
 
-박스스코어:
-{json.dumps(box, ensure_ascii=False, indent=2)[:6000]}
+핵심 데이터 ({team_name} 관점):
+{json.dumps(compact, ensure_ascii=False, indent=2)[:5000]}
 
 위 데이터를 바탕으로, {team_name} 관점에서 {verdict}의 핵심 이유를
 1~2문장으로 요약해주세요. 선수 이름과 수치를 한 개 이상 포함하세요.
+key_moments(결승타/홈런 등)가 있으면 우선 활용하세요.
 다른 설명 없이 요약 문장만 출력합니다."""
 
     msg = client.messages.create(
