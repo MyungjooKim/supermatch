@@ -369,6 +369,15 @@ def cmd_update(args) -> None:
         "우리 팀",
         "KBO",
         "어제 경기 결과",  # render_yesterday_summary 섹션 앵커
+        # 카드 summary / 어제 요약 본문이 blockquote 분리되며 anchor 누락 잡기
+        "이닝",          # "7이닝", "8회" 등 거의 모든 요약에 등장
+        "회",            # "8회", "9회" 등 회차 표현
+        "실점",          # "3실점", "무실점" 등 투수 기록
+        "안타",          # "결승 안타", "8안타" 등 타격 기록
+        "투수",          # "패배 투수", "선발 투수" 등
+        "결승",          # "결승타", "결승 안타" 등
+        "승리",          # "완봉승리", "승리" 등
+        "패배",          # "패배 투수", "역전패" 등
     ]
 
     slack = SlackCanvasClient()
@@ -382,7 +391,7 @@ def cmd_update(args) -> None:
     # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
     # 정렬 순서: 표 셀 단어(priority) → 헤더 → 본문 anchor.
     # 사용자 관찰에 따르면 표 셀을 먼저 비워야 빈 표 컨테이너가 따라서 정리됨.
-    MAX_PASSES = 5
+    MAX_PASSES = 7
     for attempt in range(MAX_PASSES):
         section_ids = slack.list_sections_by_anchors(
             canvas_id,
