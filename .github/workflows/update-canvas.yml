@@ -59,48 +59,6 @@ jobs:
           IS_FINAL_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '37 14 * * *' && 'true' || inputs.is_final_run || 'false' }}
         run: python src/main.py update
 
-      - name: "[DIAG] Canvas state after update"
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CANVAS_ID: ${{ secrets.SLACK_CANVAS_ID }}
-        run: |
-          python <<'PY'
-          import os, requests, json
-          token = os.environ["SLACK_BOT_TOKEN"]
-          cid = os.environ["SLACK_CANVAS_ID"]
-          hdr = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-          print(f"=== Canvas ID in use: {cid} ===")
-
-          # 1) bot identity
-          r = requests.post("https://slack.com/api/auth.test", headers=hdr, timeout=10)
-          print("\n[auth.test]", json.dumps(r.json(), ensure_ascii=False, indent=2))
-
-          # 2) Canvas any_header sections
-          r = requests.post(
-              "https://slack.com/api/canvases.sections.lookup",
-              headers=hdr, timeout=10,
-              json={"canvas_id": cid, "criteria": {"section_types": ["any_header"]}},
-          )
-          print("\n[any_header sections]", json.dumps(r.json(), ensure_ascii=False, indent=2)[:3000])
-
-          # 3) 본문에 "우리 팀" 들어간 섹션
-          r = requests.post(
-              "https://slack.com/api/canvases.sections.lookup",
-              headers=hdr, timeout=10,
-              json={"canvas_id": cid, "criteria": {"contains_text": "우리 팀"}},
-          )
-          print("\n[contains '우리 팀']", json.dumps(r.json(), ensure_ascii=False, indent=2)[:2000])
-
-          # 4) 본문에 "KBO" 들어간 섹션
-          r = requests.post(
-              "https://slack.com/api/canvases.sections.lookup",
-              headers=hdr, timeout=10,
-              json={"canvas_id": cid, "criteria": {"contains_text": "KBO"}},
-          )
-          print("\n[contains 'KBO']", json.dumps(r.json(), ensure_ascii=False, indent=2)[:2000])
-          PY
-
       - name: Save summary state
         # IS_FINAL_RUN일 때만 state 파일이 생성됨 — 변경 없으면 자동 스킵
         if: env.IS_FINAL_RUN == 'true'
