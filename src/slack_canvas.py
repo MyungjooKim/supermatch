@@ -129,12 +129,6 @@ class SlackCanvasClient:
         for anchor in text_anchors or []:
             _collect({"contains_text": anchor}, f"text:{anchor}")
 
-        # 4) Universal anchor — 공백 한 글자로 모든 텍스트 섹션 잡기 (Slack 실측 동작).
-        # contains_text=" "는 본문에 공백이 한 번이라도 들어간 모든 섹션을 매칭.
-        # 마크다운 본문은 거의 항상 공백을 포함하므로, 위 anchor에서 누락된 잔재까지
-        # 마지막에 한 번 더 쓸어담는 효과.
-        _collect({"contains_text": " "}, "universal:space")
-
         return ordered
 
     # 하위 호환 — 기존 호출자가 list_all_sections 그대로 쓰도록 유지
