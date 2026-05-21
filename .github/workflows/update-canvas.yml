@@ -35,7 +35,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,47 +49,6 @@ jobs:
 
       - name: Install deps
         run: pip install -r requirements.txt
-
-      - name: "[DIAG] Probe Slack lookup API edge cases"
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CANVAS_ID: ${{ secrets.SLACK_CANVAS_ID }}
-        run: |
-          python <<'PY'
-          import os, requests, json
-          token = os.environ["SLACK_BOT_TOKEN"]
-          cid = os.environ["SLACK_CANVAS_ID"]
-          hdr = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-          def probe(label, payload):
-              r = requests.post("https://slack.com/api/canvases.sections.lookup",
-                  headers=hdr, json=payload, timeout=10)
-              j = r.json()
-              ok = j.get("ok")
-              n = len(j.get("sections", [])) if ok else 0
-              err = j.get("error", "") if not ok else ""
-              print(f"[{label}] ok={ok} sections={n} err={err}")
-              if ok and n > 0:
-                  for s in j["sections"][:3]:
-                      print(f"   - {s.get('id')}")
-              return j
-
-          # 1) 빈 문자열로 contains_text
-          probe("contains_text=''", {"canvas_id": cid, "criteria": {"contains_text": ""}})
-
-          # 2) 한 글자 공백
-          probe("contains_text=' '", {"canvas_id": cid, "criteria": {"contains_text": " "}})
-
-          # 3) 줄바꿈
-          probe("contains_text='\\n'", {"canvas_id": cid, "criteria": {"contains_text": "\n"}})
-
-          # 4) section_types에 다른 값들 시도 (any, paragraph, quote, divider)
-          for st in ["any", "paragraph", "quote", "blockquote", "divider", "any_section", "rich_text"]:
-              probe(f"section_types=['{st}']", {"canvas_id": cid, "criteria": {"section_types": [st]}})
-
-          # 5) 헤더만 lookup해서 ID들 확보
-          r = probe("any_header (baseline)", {"canvas_id": cid, "criteria": {"section_types": ["any_header"]}})
-          PY
 
       - name: Update Canvas
         env:

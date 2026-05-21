@@ -423,7 +423,8 @@ def cmd_update(args) -> None:
     # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
     # 정렬 순서: 표 셀 단어(priority) → 헤더 → 본문 anchor.
     # 사용자 관찰에 따르면 표 셀을 먼저 비워야 빈 표 컨테이너가 따라서 정리됨.
-    MAX_PASSES = 7
+    # 5분 timeout 안에 끝나도록 pass 수를 제한. 잔재가 많아도 3 pass면 대부분 정리됨.
+    MAX_PASSES = 3
     for attempt in range(MAX_PASSES):
         section_ids = slack.list_sections_by_anchors(
             canvas_id,
