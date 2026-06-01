@@ -200,10 +200,12 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         home_label = f"{home_marker}{g.home_name}"
         # blockquote (>) 로 한 경기를 시각적 묶음 처리
         # 끝에 \n을 두지 않음 — "\n".join으로 합쳐질 때 빈 줄이 생기지 않게.
+        # 둘째 줄 끝에 hard break("  ")를 붙여 다음 경기 카드와 lazy
+        # continuation으로 합쳐지지 않게 막음.
         parts.append(
             f"> :baseball: **{time_label}** · "
             f"{away_label} {score} {home_label}  \n"
-            f"> :round_pushpin: {g.stadium} · {status}"
+            f"> :round_pushpin: {g.stadium} · {status}  "
         )
     return "\n".join(parts) + "\n"
 
@@ -284,6 +286,8 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     # 1줄: 순위. 팀명 (이번주 연속 + 응원팀 ⭐) — 승률
     # 2줄: 경기 W승 D무 L패 · 게임차 N
     # 끝에 \n을 두지 않음 — "\n".join으로 합쳐질 때 빈 줄이 생기지 않게.
+    # 대신 둘째 줄 끝에 hard break("  ")를 붙여 다음 팀의 첫 줄과
+    # markdown blockquote lazy continuation으로 합쳐지지 않게 막음.
     for s in standings:
         marker = "⭐ " if s.team_code in TARGET_TEAMS else ""
         gb = "1위" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}경기차"
@@ -291,7 +295,7 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
         parts.append(
             f"> **{s.ranking}위 · {marker}{s.team_name}** — 승률 **{s.win_rate:.3f}**  \n"
             f"> {s.games}경기 · {s.wins}승 {s.draws}무 {s.losses}패 · "
-            f"{gb} · 연속 {s.streak}"
+            f"{gb} · 연속 {s.streak}  "
         )
 
     # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
