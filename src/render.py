@@ -227,13 +227,19 @@ def render_yesterday_summary(yesterday: dt.date, summaries: dict[str, str]) -> s
     month = yesterday.month
     day = yesterday.day
     parts = [f"## :rewind: 우리 팀 어제 경기 결과 ({month}/{day})"]
+    team_lines: list[str] = []
     for code in ("LG", "SS", "LT"):
         text = summaries.get(code)
         if not text:
             continue
         emoji = TEAM_EMOJI.get(code, ":baseball:")
         name = TEAM_NAME.get(code, code)
-        parts.append(f"> {emoji} **{name}**: {text}")
+        team_lines.append(f"> {emoji} **{name}**: {text}")
+    if team_lines:
+        # 각 팀 사이에 blockquote 내부 빈 줄("\n>\n")을 끼워 시각적 단락 분리.
+        # 같은 blockquote 컨테이너 안의 paragraph break이라 빈 섹션은 생성되지 않음
+        # (\n\n으로 컨테이너 자체가 끊기지 않게 ">"를 유지).
+        parts.append("\n>\n".join(team_lines))
     return "\n".join(parts) + "\n"
 
 
