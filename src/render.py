@@ -70,17 +70,19 @@ def render_team_card(
     emoji = TEAM_EMOJI.get(team_code, ":baseball:")
     name = TEAM_NAME.get(team_code, team_code)
 
+    # 카드 끝에 \n 두지 않음 — render_team_section의 "\n".join이
+    # 카드 사이에 \n을 넣을 때 trailing \n이 합쳐지면 빈 줄(=빈 섹션)이 누적됨.
     if game is None:
         # 경기 없는 날
         return (
             f"## {emoji} {name}\n"
-            f"> _{summary}_\n"
+            f"> _{summary}_"
         )
 
     if game.is_canceled:
         return (
             f"## {emoji} {name}\n"
-            f"> 우천 등 사유로 경기 취소 ({game.stadium})\n"
+            f"> 우천 등 사유로 경기 취소 ({game.stadium})"
         )
 
     opp_code = game.opponent_of(team_code)
@@ -101,7 +103,7 @@ def render_team_card(
         status_label = "경기 중" if game.status == "LIVE" else f"{when} 경기 예정"
         return (
             f"## {emoji} {my_label}\n"
-            f"**vs {opp_label}** · {game.stadium} · {status_label}\n"
+            f"**vs {opp_label}** · {game.stadium} · {status_label}"
         )
 
     # 결과 있음
@@ -117,7 +119,7 @@ def render_team_card(
     return (
         f"## {emoji} {name} {verdict_badge}\n"
         f"**{my_score} : {opp_score}** vs {opp} · {game.stadium}\n"
-        f"> {summary}\n"
+        f"> {summary}"
     )
 
 
@@ -197,10 +199,11 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         away_label = f"{away_marker}{g.away_name}"
         home_label = f"{home_marker}{g.home_name}"
         # blockquote (>) 로 한 경기를 시각적 묶음 처리
+        # 끝에 \n을 두지 않음 — "\n".join으로 합쳐질 때 빈 줄이 생기지 않게.
         parts.append(
             f"> :baseball: **{time_label}** · "
             f"{away_label} {score} {home_label}  \n"
-            f"> :round_pushpin: {g.stadium} · {status}\n"
+            f"> :round_pushpin: {g.stadium} · {status}"
         )
     return "\n".join(parts) + "\n"
 
@@ -236,16 +239,15 @@ def render_footer() -> str:
     # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
     # KST로 표기하므로 KST tz를 명시합니다.
     #
-    # 주의: 마크다운 `---` 수평선은 Slack Canvas에서 텍스트 없는 별도 섹션이 되어
-    # wipe anchor에 매칭되지 않고 누적됩니다. 따라서 수평선은 사용하지 않고
-    # 빈 줄로만 시각적 분리를 만듭니다.
+    # 주의: 빈 줄(\n\n)은 Slack Canvas에서 텍스트 없는 별도 섹션을 생성하여
+    # wipe anchor(contains_text)에 매칭되지 않고 누적됩니다. 따라서 마크다운에
+    # 빈 줄을 두지 않고 한 단락으로 이어 작성합니다. 마크다운 `---` 수평선도
+    # 같은 이유로 사용 금지.
     now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
-        f"\n"
         f":wrench: **관리자 도구**: [GitHub에서 수동 실행]({MANUAL_UPDATE_URL}) "
-        f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37\n"
-        f"\n"
-        f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_\n"
+        f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37  \n"
+        f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_"
     )
 
 
@@ -281,6 +283,7 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
     # 카드 형태 — 팀당 2줄.
     # 1줄: 순위. 팀명 (이번주 연속 + 응원팀 ⭐) — 승률
     # 2줄: 경기 W승 D무 L패 · 게임차 N
+    # 끝에 \n을 두지 않음 — "\n".join으로 합쳐질 때 빈 줄이 생기지 않게.
     for s in standings:
         marker = "⭐ " if s.team_code in TARGET_TEAMS else ""
         gb = "1위" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}경기차"
@@ -288,13 +291,13 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
         parts.append(
             f"> **{s.ranking}위 · {marker}{s.team_name}** — 승률 **{s.win_rate:.3f}**  \n"
             f"> {s.games}경기 · {s.wins}승 {s.draws}무 {s.losses}패 · "
-            f"{gb} · 연속 {s.streak}\n"
+            f"{gb} · 연속 {s.streak}"
         )
 
     # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
     target_recents = [s for s in standings if s.team_code in TARGET_TEAMS]
     if target_recents:
-        parts.append("")
+        # 빈 줄 append는 빈 섹션을 생성하므로 제거. heading만으로 시각적 분리.
         parts.append("**:star: 응원팀 최근 5경기**")
         for s in target_recents:
             parts.append(f"- {s.team_name}: {_last_five_emoji(s.last_five)}")
