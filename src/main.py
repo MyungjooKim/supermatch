@@ -335,7 +335,7 @@ def cmd_update(args) -> None:
     # 각 anchor가 서로 다른 섹션 종류를 잡도록 신중히 선별.
     text_anchors = [
         # 1) H1/H2 헤더
-        "우리 팀",        # render_header: "# 우리 팀 오늘"
+        "우리 팀",        # render_header: "# :duck_wave01: 우리 팀 오늘 · ..."
         "KBO",            # render_no_games_notice / render_standings_table 헤더
         "어제 경기 결과",  # render_yesterday_summary 섹션 헤더
 
@@ -347,10 +347,9 @@ def cmd_update(args) -> None:
         "라이온즈",
         "자이언츠",
 
-        # 4) standings 본문
+        # 4) standings 본문 (한 줄 압축 레이아웃)
         "승률",           # standings 행: "승률 0.610"
-        "경기차",         # standings 행: "0.5경기차"
-        "순위",           # no_games 블록쿼트: "팀 순위를 확인해보세요" 등
+        "연속",           # standings 행: "연속 3승" — 응원팀 행도 매칭
 
         # 5) 어제 요약 본문 (blockquote 텍스트) — Claude 야구 요약 분석상
         # 거의 모든 문장이 아래 단어 중 1개 이상 포함:
@@ -360,19 +359,18 @@ def cmd_update(args) -> None:
         "이닝",           # 투수 호투 묘사
         "실점",           # 투수 기록
 
-        # 6) 휴식일 / 응원팀 경기없음 카드 (blockquote)
-        "휴식",           # "월요일은 정기 휴식일", "오늘은 휴식. 잠실의 깃발..."
+        # 6) 휴식일 / 응원팀 경기없음 카드
+        "휴식",           # "오늘은 KBO 휴식일", "오늘은 휴식. 잠실의 깃발..."
         "잠실",           # LG 경기없음 메시지: "잠실의 깃발은 내일을..."
         "사직",           # LT 경기없음 메시지: "사직은 잠시 조용합니다..."
         "깃발",           # LG 메시지 보강
         "갈매기",         # LT 메시지 보강
-        "응원팀",         # standings_table 끝의 "응원팀 최근 5경기" 라인
-        "최근",           # 같은 라인 보강
+        "순위",           # no_games_notice: "팀 순위를 확인해보세요"
 
-        # 7) 푸터
-        "데이터",         # ":wrench: ... 데이터: Naver 스포츠"
-        "관리자",         # 푸터: ":wrench: **관리자 도구**: ..."
-        "갱신",           # 푸터: "자동 갱신: KST 08:07 / ..."
+        # 7) 푸터 (italic으로 무게 낮춤)
+        "데이터",         # "_업데이트: ... · 데이터: Naver 스포츠 ..._"
+        "관리자",         # "_:wrench: 관리자 도구: ..._"
+        "갱신",           # "_... · 자동 갱신: KST 08:07 / ..._"
     ]
 
     slack = SlackCanvasClient()

@@ -45,10 +45,9 @@ ANCHOR_FOOTER = "데이터: Naver 스포츠"
 
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
-    return (
-        f"# :duck_wave01: 우리 팀 오늘\n"
-        f"### {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
-    )
+    # H1 한 줄로 통합 — 날짜를 별도 H3로 두면 바로 아래 H2(:coffee:/팀 카드)와
+    # 시각적 무게가 충돌함.
+    return f"# :duck_wave01: 우리 팀 오늘 · {date.year}년 {date.month}월 {date.day}일 ({weekday})\n"
 
 
 def _name_with_starter(team_name: str, starter: str) -> str:
@@ -251,10 +250,13 @@ def render_footer() -> str:
     # wipe anchor(contains_text)에 매칭되지 않고 누적됩니다. 따라서 마크다운에
     # 빈 줄을 두지 않고 한 단락으로 이어 작성합니다. 마크다운 `---` 수평선도
     # 같은 이유로 사용 금지.
+    #
+    # 본문보다 시각적 무게를 낮추기 위해 두 줄 모두 italic. 관리자 정보는
+    # 일반 사용자에겐 노이즈이므로 작게.
     now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
-        f":wrench: **관리자 도구**: [GitHub에서 수동 실행]({MANUAL_UPDATE_URL}) "
-        f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37  \n"
+        f"_:wrench: 관리자 도구: [GitHub에서 수동 실행]({MANUAL_UPDATE_URL}) "
+        f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37_  \n"
         f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_"
     )
 
@@ -281,36 +283,26 @@ def _last_five_emoji(s: str) -> str:
 
 
 def render_standings_table(standings: list[TeamStanding]) -> str:
-    """KBO 정규시즌 팀 순위 — monospace 코드블록.
+    """KBO 정규시즌 팀 순위 — blockquote 한 팀 1줄 컴팩트 레이아웃.
 
-    응원팀(LG/삼성/롯데)은 ⭐ 마커로 강조. 표 컨테이너가 아니라
-    monospace 정렬을 쓰는 이유는 schedule_table 주석 참고.
+    응원팀(LG/삼성/롯데)은 ⭐ 마커 + 최근 5경기 색깔 점으로 강조.
     """
     parts = ["## :bar_chart: KBO 팀 순위"]
 
-    # 카드 형태 — 팀당 2줄.
-    # 1줄: 순위. 팀명 (이번주 연속 + 응원팀 ⭐) — 승률
-    # 2줄: 경기 W승 D무 L패 · 게임차 N
-    # 끝에 \n을 두지 않음 — "\n".join으로 합쳐질 때 빈 줄이 생기지 않게.
-    # 대신 둘째 줄 끝에 hard break("  ")를 붙여 다음 팀의 첫 줄과
-    # markdown blockquote lazy continuation으로 합쳐지지 않게 막음.
+    # 팀당 1줄 — 가로로 압축해 한눈에 스캔 가능. 응원팀은 같은 줄에 최근 5경기
+    # 색깔 점도 붙여 "최근 5경기" 별도 박스가 필요없게 흡수.
+    # 각 줄 끝에 hard break("  ")를 붙여 다음 줄과 lazy continuation 차단.
+    rank_lines: list[str] = []
     for s in standings:
         marker = "⭐ " if s.team_code in TARGET_TEAMS else ""
-        gb = "1위" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}경기차"
-        # 1위는 게임차 대신 "1위" 라벨
-        parts.append(
-            f"> **{s.ranking}위 · {marker}{s.team_name}** — 승률 **{s.win_rate:.3f}**  \n"
-            f"> {s.games}경기 · {s.wins}승 {s.draws}무 {s.losses}패 · "
-            f"{gb} · 연속 {s.streak}  "
+        gb = "1위" if s.game_behind == 0.0 and s.ranking == 1 else f"{s.game_behind:.1f}G"
+        recent = f" · {_last_five_emoji(s.last_five)}" if s.team_code in TARGET_TEAMS else ""
+        rank_lines.append(
+            f"> **{s.ranking}위 · {marker}{s.team_name}** · "
+            f"승률 {s.win_rate:.3f} · {gb} · "
+            f"{s.wins}승 {s.losses}패 {s.draws}무 · 연속 {s.streak}{recent}  "
         )
-
-    # 응원팀 최근 5경기는 컬러 점으로 별도 표시 (코드블록 안에선 emoji 변환 안 됨)
-    target_recents = [s for s in standings if s.team_code in TARGET_TEAMS]
-    if target_recents:
-        # 빈 줄 append는 빈 섹션을 생성하므로 제거. heading만으로 시각적 분리.
-        parts.append("**:star: 응원팀 최근 5경기**")
-        for s in target_recents:
-            parts.append(f"- {s.team_name}: {_last_five_emoji(s.last_five)}")
+    parts.append("\n".join(rank_lines))
 
     return "\n".join(parts) + "\n"
 
@@ -318,15 +310,8 @@ def render_standings_table(standings: list[TeamStanding]) -> str:
 def render_no_games_notice(date: dt.date) -> str:
     """경기 없는 날 안내. 월요일 정기 휴식과 그 외 휴식을 구분합니다."""
     if is_monday(date):
-        return (
-            "## :coffee: 오늘은 KBO 휴식일\n"
-            "> 월요일은 정기 휴식일입니다. 선수도, 팬도 잠시 숨을 고르는 하루.\n"
-            "> 아래는 현재 시즌의 팀 순위입니다.\n"
-        )
-    return (
-        "## :zzz: 오늘은 KBO 경기가 없습니다\n"
-        "> 다음 경기를 기다리며, 현재 시즌의 팀 순위를 확인해보세요.\n"
-    )
+        return "## :coffee: 오늘은 KBO 휴식일 — 아래는 현재 시즌의 팀 순위입니다.\n"
+    return "## :zzz: 오늘은 KBO 경기가 없습니다 — 다음 경기를 기다리며, 현재 시즌의 팀 순위를 확인해보세요.\n"
 
 
 def render_full_standings(date: dt.date, standings: list[TeamStanding]) -> str:
