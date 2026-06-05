@@ -193,7 +193,7 @@ def _is_final_run() -> bool:
     return now.hour == 23 and now.minute >= 30
 
 
-def build_canvas_chunks(date: dt.date) -> list[str]:
+def build_canvas_chunks(date: dt.date, *, skip_summaries: bool = False) -> list[str]:
     """오늘의 시즌 단계를 판정해 본문을 여러 markdown 청크로 반환합니다.
 
     Slack `insert_at_end`는 큰 마크다운 한 번에 보내면 placeholder 표를
@@ -202,6 +202,10 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
 
     REGULAR_SEASON + 경기있음 케이스만 4개 청크 (header / team_section /
     schedule / footer)로 쪼개고, 나머지 stage는 단일 청크 그대로.
+
+    skip_summaries=True (HTML-only 로컬 생성용): ANTHROPIC_API_KEY 없이도
+    돌도록 Claude 요약 생성을 건너뛴다. 경기 카드는 요약 없이(빈 문자열),
+    어제 요약 섹션은 숨김. 기본값 False 라 Slack(cmd_update) 동작은 불변.
     """
     games = fetch_schedule(date)
     stage = detect_season_stage(date, RealFetcher())
@@ -225,16 +229,19 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
         render_team_section,
     )
 
-    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    claude = None if skip_summaries else anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     # 어제 경기 결과 요약 (None = 섹션 숨김, {} = 결과 없음)
     yesterday = date - dt.timedelta(days=1)
-    final_run = _is_final_run()
-    print(f"[yesterday] is_final_run={final_run}")
-    yest_summaries = build_yesterday_summaries(date, stage, claude, is_final_run=final_run)
     yest_chunk = ""
-    if yest_summaries is not None:
-        yest_chunk = render_yesterday_summary(yesterday, yest_summaries)
+    if not skip_summaries:
+        final_run = _is_final_run()
+        print(f"[yesterday] is_final_run={final_run}")
+        yest_summaries = build_yesterday_summaries(date, stage, claude, is_final_run=final_run)
+        if yest_summaries is not None:
+            yest_chunk = render_yesterday_summary(yesterday, yest_summaries)
+    else:
+        print("[html-only] skipping Claude summaries (no ANTHROPIC_API_KEY needed)")
 
     if stage == SeasonStage.POSTSEASON:
         standings = fetch_team_stats(date.year)
@@ -252,7 +259,11 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
 
     # REGULAR_SEASON
     if games:
-        summaries = build_summaries(games, claude)
+        summaries = (
+            {code: "" for code in ("LG", "SS", "LT")}
+            if skip_summaries
+            else build_summaries(games, claude)
+        )
         starters_by_game: dict[str, dict[str, str]] = {}
         for code in ("LG", "SS", "LT"):
             tg = next((g for g in games if g.involves(code)), None)
@@ -286,9 +297,28 @@ def build_canvas_chunks(date: dt.date) -> list[str]:
     return chunks
 
 
-def build_canvas_markdown(date: dt.date) -> str:
-    """기존 호환성용 — 청크들을 합쳐 한 string으로 반환. cmd_init에서만 사용."""
-    return "\n".join(build_canvas_chunks(date))
+def build_canvas_markdown(date: dt.date, *, skip_summaries: bool = False) -> str:
+    """청크들을 합쳐 한 string으로 반환. cmd_init / cmd_page 에서 사용."""
+    return "\n".join(build_canvas_chunks(date, skip_summaries=skip_summaries))
+
+
+# GitHub Pages 산출물 경로 (main/docs 를 Pages 소스로 사용)
+DOCS_HTML_PATH = os.path.join(os.path.dirname(__file__), "..", "docs", "index.html")
+
+
+def write_html_page(date: dt.date, markdown: str) -> None:
+    """Canvas용 마크다운을 GitHub Pages용 HTML(docs/index.html)로 변환·저장.
+
+    Slack Canvas 경로와 병행하는 부가 단계. 실패해도 Canvas 갱신은 영향받지
+    않도록 호출 측에서 try/except 로 감싼다.
+    """
+    from page import render_html_page
+
+    html = render_html_page(date, markdown)
+    os.makedirs(os.path.dirname(DOCS_HTML_PATH), exist_ok=True)
+    with open(DOCS_HTML_PATH, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"✓ wrote GitHub Pages HTML: {os.path.relpath(DOCS_HTML_PATH)}")
 
 
 def cmd_init(args) -> None:
@@ -299,6 +329,20 @@ def cmd_init(args) -> None:
     canvas_id = slack.create_canvas(CANVAS_TITLE, markdown, channel_id=args.channel)
     print(f"CANVAS_ID={canvas_id}")
     print("→ 이 값을 GitHub Secrets의 SLACK_CANVAS_ID에 저장하세요.")
+
+
+def cmd_page(args) -> None:
+    """Slack 없이 GitHub Pages용 docs/index.html 만 생성 (로컬 첫 배포·검증용).
+
+    ANTHROPIC_API_KEY 가 환경에 있으면 요약 포함, 없으면 자동으로 요약을 건너뛴다
+    (--no-summaries 로 강제 건너뛰기도 가능). Slack 토큰은 일절 필요 없음.
+    """
+    date = today_kst()
+    skip = bool(getattr(args, "no_summaries", False)) or not os.environ.get("ANTHROPIC_API_KEY")
+    if skip and not os.environ.get("ANTHROPIC_API_KEY"):
+        print("[html-only] ANTHROPIC_API_KEY 없음 → 요약 생략 모드로 생성")
+    markdown = build_canvas_markdown(date, skip_summaries=skip)
+    write_html_page(date, markdown)
 
 
 def cmd_update(args) -> None:
@@ -424,6 +468,13 @@ def cmd_update(args) -> None:
     except Exception as e:
         print(f"[warn] rename failed: {e}", file=sys.stderr)
 
+    # 4) GitHub Pages 미러 — 같은 chunks 를 HTML 로도 출력 (추가 fetch 없음).
+    # 실패해도 Canvas 갱신 결과에는 영향 주지 않도록 격리.
+    try:
+        write_html_page(date, "\n".join(chunks))
+    except Exception as e:
+        print(f"[warn] HTML page generation failed: {e}", file=sys.stderr)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Supermatch - KBO daily Canvas updater")
@@ -436,6 +487,14 @@ def main() -> None:
     p_update = sub.add_parser("update", help="기존 Canvas를 오늘자로 갱신")
     p_update.add_argument("--canvas-id", help="(선택) 환경변수 대신 직접 전달")
     p_update.set_defaults(func=cmd_update)
+
+    p_page = sub.add_parser("page", help="Slack 없이 docs/index.html (GitHub Pages) 만 생성")
+    p_page.add_argument(
+        "--no-summaries",
+        action="store_true",
+        help="ANTHROPIC_API_KEY 가 있어도 Claude 요약을 건너뛰고 생성",
+    )
+    p_page.set_defaults(func=cmd_page)
 
     args = parser.parse_args()
     args.func(args)
