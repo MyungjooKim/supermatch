@@ -1,15 +1,14 @@
 """
-Slack Canvas용으로 만든 동일한 마크다운을 GitHub Pages용 정적 HTML로 변환합니다.
+render.py 가 만든 마크다운을 GitHub Pages용 정적 HTML로 변환합니다.
 
 설계 의도:
-- Canvas 경로(main.py:cmd_update)와 **완전히 병행**. Slack 출력은 건드리지 않고,
-  build_canvas_markdown()이 만든 같은 마크다운 문자열을 입력으로 받아 HTML만 생성.
-- 의존성 최소화: markdown 라이브러리 1개만 추가 (requirements.txt).
+- 의존성 최소화: markdown 라이브러리 1개만 사용 (requirements.txt).
 - 단일 self-contained HTML (외부 CSS/JS 파일 없음). docs/index.html 하나로 배포.
 
-Slack 전용 표기 보정:
-- `:shortcode:` 이모지 → 유니코드 이모지로 대체. 워크스페이스 커스텀 전용이라
-  대체 불가한 것은 제거 (웹에 raw `:xxx:` 노출 방지).
+표기 보정:
+- `:shortcode:` 이모지 → 유니코드 이모지로 대체. 매핑에 없는 것은 제거
+  (웹에 raw `:xxx:` 노출 방지). render.py 에 새 shortcode를 추가하면
+  아래 SHORTCODE_TO_UNICODE 에도 반드시 추가해야 합니다.
 """
 
 from __future__ import annotations
@@ -26,9 +25,9 @@ except Exception:  # pragma: no cover - import 경로 방어
     KST = dt.timezone(dt.timedelta(hours=9))
 
 
-# ── Slack shortcode → 유니코드 이모지 매핑 ──────────────────────────────────
+# ── shortcode → 유니코드 이모지 매핑 ────────────────────────────────────────
 # render.py 에서 실제 사용 중인 shortcode 전체를 커버.
-# 표준 이모지는 유니코드로, 팀 커스텀은 가장 가까운 동물/상징 이모지로 대체.
+# 표준 이모지는 유니코드로, 팀은 가장 가까운 동물/상징 이모지로 대체.
 # 매핑에 없는 `:xxx:` 는 정규식으로 일괄 제거.
 SHORTCODE_TO_UNICODE: dict[str, str] = {
     # 표준
@@ -71,10 +70,8 @@ def _replace_emoji(text: str) -> str:
 
 
 # ── 페이지 셸 (self-contained HTML) ─────────────────────────────────────────
-# Slack Canvas 와 동일 내용을 웹에서 보기 좋게. 반응형 + 한글 폰트 + 다크 대응.
-SLACK_CANVAS_NOTE = (
-    "이 페이지는 Slack Canvas와 동일한 KBO 현황을 웹으로 미러링한 것입니다."
-)
+# 반응형 + 한글 폰트 + 다크 모드 대응.
+PAGE_NOTE = "LG · 삼성 · 롯데 중심으로 매일 4번 자동 갱신되는 KBO 현황판입니다."
 
 _PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="ko">
@@ -141,17 +138,17 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-def render_html_page(date: dt.date, canvas_markdown: str) -> str:
-    """Canvas용 마크다운 → GitHub Pages용 self-contained HTML.
+def render_html_page(date: dt.date, page_markdown: str) -> str:
+    """페이지 마크다운 → GitHub Pages용 self-contained HTML.
 
     Args:
         date: 페이지 기준 날짜 (KST).
-        canvas_markdown: build_canvas_markdown(date) 결과 — Slack Canvas 본문과 동일.
+        page_markdown: build_markdown(date) 결과.
 
     Returns:
         완성된 HTML 문자열 (docs/index.html 에 그대로 write).
     """
-    md_text = _replace_emoji(canvas_markdown)
+    md_text = _replace_emoji(page_markdown)
     body_html = _md.markdown(
         md_text,
         extensions=["tables", "nl2br", "sane_lists"],
@@ -163,4 +160,4 @@ def render_html_page(date: dt.date, canvas_markdown: str) -> str:
         f'<a href="https://github.com/MyungjooKim/supermatch">supermatch</a> · '
         f"데이터: Naver 스포츠"
     )
-    return _PAGE_TEMPLATE.format(note=SLACK_CANVAS_NOTE, body=body_html, foot=foot)
+    return _PAGE_TEMPLATE.format(note=PAGE_NOTE, body=body_html, foot=foot)

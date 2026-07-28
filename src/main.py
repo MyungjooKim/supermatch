@@ -1,12 +1,12 @@
 """
-KBO Canvas updater 메인 엔트리포인트.
+KBO 데일리 페이지 생성 엔트리포인트.
 
 사용법:
-  # 최초 1회: Canvas 생성. 출력된 canvas_id를 GitHub Secrets에 저장.
-  python main.py init --channel C0123456789
-
-  # 매일 실행 (GitHub Actions):
+  # 매일 실행 (GitHub Actions) — docs/index.html 을 오늘자로 갱신
   python main.py update
+
+  # 로컬 확인용 — 요약 없이(ANTHROPIC_API_KEY 불필요) 생성
+  python main.py update --no-summaries
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from naver_kbo import (
     today_kst,
 )
 from render import (
-    render_full_canvas,
     render_full_standings,
     render_offseason_after,
     render_offseason_before,
@@ -38,15 +37,13 @@ from render import (
     render_yesterday_summary,
 )
 from season_stage import RealFetcher, SeasonStage, detect_season_stage
-from slack_canvas import SlackCanvasClient
 from summarize import no_game_message, summarize_game_for_team
-
-# Canvas title — markdown 포맷. :baseball: shortcode가 ⚾로 변환됩니다.
-# rename operation에서도 markdown으로 받기 때문에 init/update가 동일하게 사용.
-CANVAS_TITLE = ":baseball: 오늘의 KBO :baseball:"
 
 # 어제 경기 요약을 저장하는 파일 (23:37 실행이 저장, 이후 실행이 읽음)
 SUMMARY_STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "state", "yesterday_summary.json")
+
+# GitHub Pages 산출물 경로 (main/docs 를 Pages 소스로 사용)
+DOCS_HTML_PATH = os.path.join(os.path.dirname(__file__), "..", "docs", "index.html")
 
 
 def _load_summary_state() -> dict:
@@ -193,19 +190,11 @@ def _is_final_run() -> bool:
     return now.hour == 23 and now.minute >= 30
 
 
-def build_canvas_chunks(date: dt.date, *, skip_summaries: bool = False) -> list[str]:
-    """오늘의 시즌 단계를 판정해 본문을 여러 markdown 청크로 반환합니다.
+def build_markdown(date: dt.date, *, skip_summaries: bool = False) -> str:
+    """오늘의 시즌 단계를 판정해 페이지 본문 마크다운을 반환합니다.
 
-    Slack `insert_at_end`는 큰 마크다운 한 번에 보내면 placeholder 표를
-    부수효과로 만드는 quirk가 관찰됐습니다. 본문을 작은 청크들로 쪼개
-    순차적으로 insert하면 각 호출이 단순해서 placeholder가 줄어들 수 있습니다.
-
-    REGULAR_SEASON + 경기있음 케이스만 4개 청크 (header / team_section /
-    schedule / footer)로 쪼개고, 나머지 stage는 단일 청크 그대로.
-
-    skip_summaries=True (HTML-only 로컬 생성용): ANTHROPIC_API_KEY 없이도
-    돌도록 Claude 요약 생성을 건너뛴다. 경기 카드는 요약 없이(빈 문자열),
-    어제 요약 섹션은 숨김. 기본값 False 라 Slack(cmd_update) 동작은 불변.
+    skip_summaries=True: ANTHROPIC_API_KEY 없이도 돌도록 Claude 요약 생성을
+    건너뛴다. 경기 카드는 요약 없이(빈 문자열), 어제 요약 섹션은 숨김.
     """
     games = fetch_schedule(date)
     stage = detect_season_stage(date, RealFetcher())
@@ -215,12 +204,12 @@ def build_canvas_chunks(date: dt.date, *, skip_summaries: bool = False) -> list[
         last_year = date.year - 1
         last_year_stats = fetch_team_stats(last_year)
         if stage == SeasonStage.PRESEASON:
-            return [render_preseason(date, last_year, last_year_stats)]
-        return [render_offseason_before(date, last_year, last_year_stats)]
+            return render_preseason(date, last_year, last_year_stats)
+        return render_offseason_before(date, last_year, last_year_stats)
 
     if stage == SeasonStage.OFFSEASON_AFTER:
         final_stats = fetch_team_stats(date.year)
-        return [render_offseason_after(date, date.year, final_stats)]
+        return render_offseason_after(date, date.year, final_stats)
 
     from render import (
         render_footer,
@@ -245,17 +234,16 @@ def build_canvas_chunks(date: dt.date, *, skip_summaries: bool = False) -> list[
 
     if stage == SeasonStage.POSTSEASON:
         standings = fetch_team_stats(date.year)
-        top5 = standings[:5]
-        po_chunk = render_postseason_top5(date, games, top5)
+        po_body = render_postseason_top5(date, games, standings[:5])
         if yest_chunk:
             # render_postseason_top5에 이미 footer가 포함돼 있으므로
-            # footer(":wrench: 관리자 도구") 직전에 어제 요약을 삽입합니다.
-            footer_anchor = ":wrench: **관리자 도구**"
-            if footer_anchor in po_chunk:
-                po_chunk = po_chunk.replace(footer_anchor, f"{yest_chunk}\n{footer_anchor}", 1)
+            # footer 직전에 어제 요약을 삽입합니다.
+            footer_anchor = "_업데이트:"
+            if footer_anchor in po_body:
+                po_body = po_body.replace(footer_anchor, f"{yest_chunk}\n{footer_anchor}", 1)
             else:
-                po_chunk = po_chunk + "\n" + yest_chunk
-        return [po_chunk]
+                po_body = po_body + "\n" + yest_chunk
+        return po_body
 
     # REGULAR_SEASON
     if games:
@@ -271,47 +259,34 @@ def build_canvas_chunks(date: dt.date, *, skip_summaries: bool = False) -> list[
                 starters_by_game[tg.game_id] = fetch_starting_pitchers(
                     tg.game_id, tg.home_code
                 )
-        chunks = [
+        parts = [
             render_header(date),
             render_team_section(games, summaries, starters_by_game),
             render_schedule_table(date, games),
         ]
         if yest_chunk:
-            chunks.append(yest_chunk)
-        chunks.append(render_footer())
-        return chunks
+            parts.append(yest_chunk)
+        parts.append(render_footer())
+        return "\n".join(parts)
 
+    # 경기 없는 날 — 순위표
     standings = fetch_team_stats(date.year)
-    chunks = [render_full_standings(date, standings)]
-    if yest_chunk:
-        # 경기 없는 날도 어제 요약 표시 — footer 직전에 삽입
-        # render_full_standings는 단일 문자열이므로 footer를 분리해 삽입
-        from render import render_footer as _rf, render_header as _rh, render_no_games_notice, render_standings_table
-        chunks = [
-            _rh(date),
-            render_no_games_notice(date),
-            render_standings_table(standings),
-            yest_chunk,
-            _rf(),
-        ]
-    return chunks
+    if not yest_chunk:
+        return render_full_standings(date, standings)
 
-
-def build_canvas_markdown(date: dt.date, *, skip_summaries: bool = False) -> str:
-    """청크들을 합쳐 한 string으로 반환. cmd_init / cmd_page 에서 사용."""
-    return "\n".join(build_canvas_chunks(date, skip_summaries=skip_summaries))
-
-
-# GitHub Pages 산출물 경로 (main/docs 를 Pages 소스로 사용)
-DOCS_HTML_PATH = os.path.join(os.path.dirname(__file__), "..", "docs", "index.html")
+    # 어제 요약이 있으면 footer 직전에 끼워넣기 위해 직접 조립
+    from render import render_no_games_notice, render_standings_table
+    return "\n".join([
+        render_header(date),
+        render_no_games_notice(date),
+        render_standings_table(standings),
+        yest_chunk,
+        render_footer(),
+    ])
 
 
 def write_html_page(date: dt.date, markdown: str) -> None:
-    """Canvas용 마크다운을 GitHub Pages용 HTML(docs/index.html)로 변환·저장.
-
-    Slack Canvas 경로와 병행하는 부가 단계. 실패해도 Canvas 갱신은 영향받지
-    않도록 호출 측에서 try/except 로 감싼다.
-    """
+    """페이지 마크다운을 GitHub Pages용 HTML(docs/index.html)로 변환·저장."""
     from page import render_html_page
 
     html = render_html_page(date, markdown)
@@ -321,180 +296,31 @@ def write_html_page(date: dt.date, markdown: str) -> None:
     print(f"✓ wrote GitHub Pages HTML: {os.path.relpath(DOCS_HTML_PATH)}")
 
 
-def cmd_init(args) -> None:
-    """최초 Canvas 생성. 출력된 canvas_id를 안전한 곳에 저장하세요."""
-    date = today_kst()
-    markdown = build_canvas_markdown(date)
-    slack = SlackCanvasClient()
-    canvas_id = slack.create_canvas(CANVAS_TITLE, markdown, channel_id=args.channel)
-    print(f"CANVAS_ID={canvas_id}")
-    print("→ 이 값을 GitHub Secrets의 SLACK_CANVAS_ID에 저장하세요.")
+def cmd_update(args) -> None:
+    """매일 실행 — docs/index.html 을 오늘자 내용으로 다시 씁니다.
 
-
-def cmd_page(args) -> None:
-    """Slack 없이 GitHub Pages용 docs/index.html 만 생성 (로컬 첫 배포·검증용).
-
-    ANTHROPIC_API_KEY 가 환경에 있으면 요약 포함, 없으면 자동으로 요약을 건너뛴다
-    (--no-summaries 로 강제 건너뛰기도 가능). Slack 토큰은 일절 필요 없음.
+    ANTHROPIC_API_KEY 가 없거나 --no-summaries 면 요약을 건너뜁니다.
     """
     date = today_kst()
-    skip = bool(getattr(args, "no_summaries", False)) or not os.environ.get("ANTHROPIC_API_KEY")
-    if skip and not os.environ.get("ANTHROPIC_API_KEY"):
+    skip = bool(getattr(args, "no_summaries", False))
+    if not skip and not os.environ.get("ANTHROPIC_API_KEY"):
         print("[html-only] ANTHROPIC_API_KEY 없음 → 요약 생략 모드로 생성")
-    markdown = build_canvas_markdown(date, skip_summaries=skip)
+        skip = True
+    markdown = build_markdown(date, skip_summaries=skip)
     write_html_page(date, markdown)
 
 
-def cmd_update(args) -> None:
-    """매일 실행 — Canvas 본문을 통째로 비우고 오늘자로 다시 채웁니다.
-
-    이전 구현은 anchor 텍스트로 섹션을 lookup해서 replace 했지만,
-    Slack의 contains_text 매칭이 여러 섹션을 잡으면서 잔여 섹션이 누적됐습니다.
-    wipe-and-refill로 바꿔 매 실행마다 정확히 1세트만 보이도록 합니다.
-
-    Slack API는 "모든 섹션 한 번에 가져오기"를 지원하지 않아,
-    any_header + 본문에 자주 등장하는 단어들을 anchor로 여러 번 lookup해
-    가능한 모든 섹션을 모은 뒤 일괄 삭제합니다. 삭제 후에도 잔여 섹션이
-    남았는지 한 번 더 확인해 정리합니다.
-    """
-    canvas_id = args.canvas_id or os.environ["SLACK_CANVAS_ID"]
-    date = today_kst()
-    chunks = build_canvas_chunks(date)
-
-    # 표 안에만 있는 셀 단어들 — wipe 시 가장 먼저 삭제 (사용자 관찰):
-    # "기존 데이터 삭제할 때 표 안 텍스트가 먼저 사라지고, 우리 팀 카드가 사라지지만
-    #  표 컨테이너는 끝까지 안 지워진다" → 표 셀 ID를 *먼저* delete 호출 큐에 넣어
-    # Slack이 빈 표 컨테이너도 함께 정리하도록 시도합니다.
-    # 표 영역 anchor — 일정표 셀에 자주 등장하는 키워드만 (구장명 다수는 중복 매칭).
-    # 표 셀이 먼저 비워져야 빈 표 컨테이너도 따라서 정리됨.
-    table_priority_anchors = [
-        "예정",          # 일정표 상태 셀 — 미시작/예정 경기
-        "종료",          # 일정표 상태 셀 — 완료 경기
-        "경기 중",       # 일정표 상태 셀 — 진행 중 (실제 출력은 공백 있음: "_경기 중_")
-        "취소",          # 일정표 상태 셀 — 우천 취소 ("_경기 취소_") + 팀 카드 취소 본문
-        "구장",          # 일정표 헤더
-    ]
-
-    # 본문 anchor — 5종류 화면 영역 각각 1~2개 키워드만으로 커버.
-    # 각 anchor가 서로 다른 섹션 종류를 잡도록 신중히 선별.
-    text_anchors = [
-        # 1) H1/H2 헤더
-        "우리 팀",        # render_header: "# :duck_wave01: 우리 팀 오늘 · ..."
-        "KBO",            # render_no_games_notice / render_standings_table 헤더
-        "어제 경기 결과",  # render_yesterday_summary 섹션 헤더
-
-        # 2) 팀 카드 본문 (오늘의 경기)
-        "vs",             # "vs KT 위즈", "**vs ...**" — 모든 팀카드에 등장
-
-        # 3) 일정표 경기 카드 + standings 본문 — 팀명 (10개 팀 중 3개만으로 커버 가능)
-        "트윈스",         # 팀명 (일정표 + 팀카드 + standings)
-        "라이온즈",
-        "자이언츠",
-
-        # 4) standings 본문 (한 줄 압축 레이아웃)
-        "승률",           # standings 행: "승률 0.610"
-        "연속",           # standings 행: "연속 3승" — 응원팀 행도 매칭
-
-        # 5) 어제 요약 본문 (blockquote 텍스트) — Claude 야구 요약 분석상
-        # 거의 모든 문장이 아래 단어 중 1개 이상 포함:
-        "결승",           # 결승타/결승 안타/결승 홈런 — 거의 모든 요약 (100%)
-        "회",             # "7회", "5회 3점" 회차 표현 (100%)
-        "안타",           # 결승 안타가 없는 경우 (홈런/외야플라이 승부) 보완
-        "이닝",           # 투수 호투 묘사
-        "실점",           # 투수 기록
-
-        # 6) 휴식일 / 응원팀 경기없음 카드
-        "휴식",           # "오늘은 KBO 휴식일", "오늘은 휴식. 잠실의 깃발..."
-        "잠실",           # LG 경기없음 메시지: "잠실의 깃발은 내일을..."
-        "사직",           # LT 경기없음 메시지: "사직은 잠시 조용합니다..."
-        "깃발",           # LG 메시지 보강
-        "갈매기",         # LT 메시지 보강
-        "순위",           # no_games_notice: "팀 순위를 확인해보세요"
-
-        # 7) 푸터 (italic으로 무게 낮춤)
-        "데이터",         # "_업데이트: ... · 데이터: Naver 스포츠 ..._"
-        "관리자",         # "_:wrench: 관리자 도구: ..._"
-        "갱신",           # "_... · 자동 갱신: KST 08:07 / ..._"
-    ]
-
-    slack = SlackCanvasClient()
-
-    # 순서 주의: wipe → insert → rename.
-    # 이전 코드는 rename을 가장 먼저 호출했는데, 이어지는 wipe가
-    # title을 담고 있는 첫 헤더 섹션까지 함께 삭제하는 부수효과가 있었습니다.
-    # rename을 가장 마지막에 호출해 wipe가 title에 영향 주지 않게 합니다.
-
-    # 1) 잔여 섹션을 끈질기게 정리. 한 pass에서 잡지 못한 섹션이 다음 pass에선
-    # 이웃 섹션이 사라지면서 새 anchor에 매칭될 수 있어 multi-pass가 효과적입니다.
-    # 정렬 순서: 표 셀 단어(priority) → 헤더 → 본문 anchor.
-    # 사용자 관찰에 따르면 표 셀을 먼저 비워야 빈 표 컨테이너가 따라서 정리됨.
-    # 5분 timeout 안에 끝나도록 pass 수를 제한. 잔재가 많아도 3 pass면 대부분 정리됨.
-    MAX_PASSES = 3
-    for attempt in range(MAX_PASSES):
-        section_ids = slack.list_sections_by_anchors(
-            canvas_id,
-            priority_anchors=table_priority_anchors,
-            text_anchors=text_anchors,
-            include_headers=True,
-        )
-        if not section_ids:
-            print(f"✓ canvas confirmed empty after pass {attempt}")
-            break
-        slack.delete_sections(canvas_id, section_ids)
-        print(f"✓ pass {attempt + 1}: attempted to clear {len(section_ids)} sections (table-first order)")
-    else:
-        leftover = slack.list_sections_by_anchors(
-            canvas_id,
-            priority_anchors=table_priority_anchors,
-            text_anchors=text_anchors,
-            include_headers=True,
-        )
-        print(
-            f"[warn] {len(leftover)} sections remain after {MAX_PASSES} passes; "
-            f"will append new content anyway",
-            file=sys.stderr,
-        )
-
-    # 2) 새 본문 삽입 — 청크별로 순차 insert.
-    for i, chunk in enumerate(chunks, 1):
-        slack.insert_at_end(canvas_id, chunk)
-        print(f"✓ inserted chunk {i}/{len(chunks)} ({len(chunk)} chars)")
-    print("✓ canvas refreshed")
-
-    # 3) Title 갱신 — wipe/insert 이후 마지막에 호출
-    try:
-        slack.rename(canvas_id, CANVAS_TITLE)
-        print(f"✓ title set: {CANVAS_TITLE}")
-    except Exception as e:
-        print(f"[warn] rename failed: {e}", file=sys.stderr)
-
-    # 4) GitHub Pages 미러 — 같은 chunks 를 HTML 로도 출력 (추가 fetch 없음).
-    # 실패해도 Canvas 갱신 결과에는 영향 주지 않도록 격리.
-    try:
-        write_html_page(date, "\n".join(chunks))
-    except Exception as e:
-        print(f"[warn] HTML page generation failed: {e}", file=sys.stderr)
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Supermatch - KBO daily Canvas updater")
+    parser = argparse.ArgumentParser(description="Supermatch - KBO daily page updater")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_init = sub.add_parser("init", help="최초 Canvas 생성")
-    p_init.add_argument("--channel", help="Canvas를 탭으로 붙일 채널 ID (선택)")
-    p_init.set_defaults(func=cmd_init)
-
-    p_update = sub.add_parser("update", help="기존 Canvas를 오늘자로 갱신")
-    p_update.add_argument("--canvas-id", help="(선택) 환경변수 대신 직접 전달")
-    p_update.set_defaults(func=cmd_update)
-
-    p_page = sub.add_parser("page", help="Slack 없이 docs/index.html (GitHub Pages) 만 생성")
-    p_page.add_argument(
+    p_update = sub.add_parser("update", help="docs/index.html 을 오늘자로 갱신")
+    p_update.add_argument(
         "--no-summaries",
         action="store_true",
         help="ANTHROPIC_API_KEY 가 있어도 Claude 요약을 건너뛰고 생성",
     )
-    p_page.set_defaults(func=cmd_page)
+    p_update.set_defaults(func=cmd_update)
 
     args = parser.parse_args()
     args.func(args)

@@ -1,14 +1,14 @@
 """
-KBO 데이터를 Slack Canvas용 마크다운으로 렌더링합니다.
+KBO 데이터를 마크다운으로 렌더링합니다. page.py 가 이 마크다운을 HTML로 변환합니다.
 
 레이아웃:
   헤더 (날짜)
   ── 응원팀 카드 (LG / 삼성 / 롯데) ──
-  ── 오늘의 KBO 전체 일정 테이블 ──
+  ── 오늘의 KBO 전체 일정 ──
   푸터
 
-Slack Canvas markdown은 표준 마크다운 + 이모지 + 체크박스 + 테이블을 지원하므로,
-이 범위 안에서 시각적 위계를 만듭니다.
+이모지는 `:shortcode:` 로 쓰고, page.py의 SHORTCODE_TO_UNICODE 가 유니코드로
+치환합니다. 새 shortcode를 쓰면 그 매핑에도 추가해야 합니다 (미매핑은 제거됨).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from naver_kbo import KST, Game, TARGET_TEAMS, TEAM_NAME, TeamStanding, is_monda
 WEEKDAY_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
 
 TEAM_EMOJI = {
-    # 응원팀 3팀은 워크스페이스 custom emoji 사용 (parametacorp Slack에 등록됨)
+    # 응원팀 3팀 — page.py에서 유니코드 이모지로 치환됨
     "LG": ":lg_lucky:",
     "SS": ":sslion:",
     "LT": ":lotte_giant:",
@@ -33,15 +33,6 @@ TEAM_EMOJI = {
     "NC": ":t-rex:",
     "KT": ":magic_wand:",
 }
-
-# 섹션 앵커 — canvases.sections.lookup이 이 텍스트로 섹션을 찾습니다.
-# Slack Canvas markdown은 HTML 주석을 그대로 텍스트로 렌더링하므로,
-# 보이는 헤딩 텍스트 자체를 anchor로 사용합니다.
-ANCHOR_HEADER = "오늘의 KBO"
-ANCHOR_TEAMS = "우리 팀 오늘"
-ANCHOR_SCHEDULE = "오늘의 전체 일정"
-ANCHOR_FOOTER = "데이터: Naver 스포츠"
-
 
 def render_header(date: dt.date) -> str:
     weekday = WEEKDAY_KO[date.weekday()]
@@ -144,27 +135,8 @@ def render_team_section(
     return "\n".join(parts) + "\n"
 
 
-def _pad_chars(s: str, n_chars: int) -> str:
-    """문자열을 정확히 n_chars 길이로 패딩 (좌측 정렬, 우측 공백).
-
-    설계 결정: 시각적 폭(픽셀)이 아니라 character count로 패딩합니다.
-    Slack 코드블록은 monospace 컨테이너지만 한글/ASCII가 같은 픽셀 폭은 아니라
-    width 기반 padding은 실패합니다. 그러나 char count 기준으로 같은 위치에
-    | 구분자를 넣으면, monospace의 column index가 같으므로 | 자체는 세로로 정렬됩니다.
-    셀 내부 텍스트 길이는 시각적으로 다르게 보이지만 컬럼 경계는 일치합니다.
-    """
-    if len(s) >= n_chars:
-        return s
-    return s + " " * (n_chars - len(s))
-
-
 def render_schedule_table(date: dt.date, games: list[Game]) -> str:
-    """오늘의 KBO 전체 경기 일정 — monospace 코드블록.
-
-    Slack Canvas 마크다운 표는 phantom placeholder 컨테이너가 누적되는
-    quirk가 있어 (Slack API로 정리 불가능) 코드블록 + 한글 폭 보정 패딩으로
-    표처럼 정렬된 효과를 냅니다.
-    """
+    """오늘의 KBO 전체 경기 일정 — 경기당 2줄 blockquote 카드."""
     parts = ["## :clipboard: 오늘의 전체 일정"]
 
     if is_monday(date) and not games:
@@ -181,8 +153,6 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
     # 카드 형태 — 한 경기당 2줄.
     # 1줄: 시간 + 원정팀(점수)홈팀, 응원팀은 ⭐
     # 2줄: 구장 · 상태
-    # Slack 코드블록 monospace가 한글에 보장 안 돼 정렬 불가능 →
-    # 정렬 포기 + 시각적 분리(블록쿼트, bold)로 가독성 확보.
     for g in sorted(games, key=lambda x: x.game_time or "99:99"):
         if g.is_canceled:
             score, status = "—", "_경기 취소_"
@@ -204,14 +174,9 @@ def render_schedule_table(date: dt.date, games: list[Game]) -> str:
         parts.append(
             f"> :baseball: **{time_label}** · "
             f"{away_label} {score} {home_label}  \n"
-            f"> :round_pushpin: {g.stadium} · {status}  "
+            f"> :round_pushpin: {g.stadium} · {status}"
         )
     return "\n".join(parts) + "\n"
-
-
-# 관리자 수동 실행 링크 — GitHub Actions workflow_dispatch UI.
-# private repo이므로 GitHub 권한이 있는 관리자만 접근/실행 가능합니다.
-MANUAL_UPDATE_URL = "https://github.com/MyungjooKim/supermatch/actions/workflows/update-canvas.yml"
 
 
 def render_yesterday_summary(yesterday: dt.date, summaries: dict[str, str]) -> str:
@@ -246,34 +211,12 @@ def render_footer() -> str:
     # GitHub Actions runner는 UTC라서 naive now()는 UTC를 출력합니다.
     # KST로 표기하므로 KST tz를 명시합니다.
     #
-    # 주의: 빈 줄(\n\n)은 Slack Canvas에서 텍스트 없는 별도 섹션을 생성하여
-    # wipe anchor(contains_text)에 매칭되지 않고 누적됩니다. 따라서 마크다운에
-    # 빈 줄을 두지 않고 한 단락으로 이어 작성합니다. 마크다운 `---` 수평선도
-    # 같은 이유로 사용 금지.
-    #
-    # 본문보다 시각적 무게를 낮추기 위해 두 줄 모두 italic. 관리자 정보는
-    # 일반 사용자에겐 노이즈이므로 작게.
+    # 본문보다 시각적 무게를 낮추기 위해 italic.
     now = dt.datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return (
-        f"_:wrench: 관리자 도구: [GitHub에서 수동 실행]({MANUAL_UPDATE_URL}) "
-        f"· 자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37_  \n"
+        f"_자동 갱신: KST 08:07 / 17:13 / 20:17 / 23:37_  \n"
         f"_업데이트: {now} KST · 데이터: Naver 스포츠 · 요약: Claude_"
     )
-
-
-def render_full_canvas(
-    date: dt.date,
-    games: list[Game],
-    summaries: dict[str, str],
-    starters_by_game: dict[str, dict[str, str]] | None = None,
-) -> str:
-    """초기 Canvas 생성용 — 전체 본문을 통째로 렌더링."""
-    return "\n".join([
-        render_header(date),
-        render_team_section(games, summaries, starters_by_game),
-        render_schedule_table(date, games),
-        render_footer(),
-    ])
 
 
 def _last_five_emoji(s: str) -> str:
@@ -315,7 +258,7 @@ def render_no_games_notice(date: dt.date) -> str:
 
 
 def render_full_standings(date: dt.date, standings: list[TeamStanding]) -> str:
-    """경기 없는 날의 Canvas 본문 — 헤더 + 휴식 안내 + 순위표 + 푸터."""
+    """경기 없는 날의 페이지 본문 — 헤더 + 휴식 안내 + 순위표 + 푸터."""
     return "\n".join([
         render_header(date),
         render_no_games_notice(date),

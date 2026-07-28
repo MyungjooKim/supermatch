@@ -1,4 +1,4 @@
-name: Update Supermatch Canvas
+name: Update Supermatch Page
 
 on:
   schedule:
@@ -15,7 +15,7 @@ on:
     - cron: "13 8 * * *"   # KST 17:13 (UTC 08:13)
     - cron: "17 11 * * *"  # KST 20:17 (UTC 11:17)
     - cron: "37 14 * * *"  # KST 23:37 (UTC 14:37) ← final run
-  workflow_dispatch:        # 수동 실행 (Slack Canvas footer 링크에서 클릭)
+  workflow_dispatch:        # 수동 실행
     inputs:
       is_final_run:
         description: "어제 경기 요약을 Claude로 생성하고 저장 (23:37 실행과 동일)"
@@ -25,10 +25,10 @@ on:
         options: ["false", "true"]
 
 concurrency:
-  group: kbo-canvas
+  group: kbo-page
   cancel-in-progress: false
 
-# state/yesterday_summary.json 파일 commit/push를 위해 write 권한 필요
+# docs/index.html + state/yesterday_summary.json commit/push를 위해 write 권한 필요
 permissions:
   contents: write
 
@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # state 파일 commit/push를 위해 write 권한 필요
+          # docs/state 파일 commit/push를 위해 write 권한 필요
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
@@ -50,10 +50,8 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Update Canvas
+      - name: Update page
         env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CANVAS_ID: ${{ secrets.SLACK_CANVAS_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # 23:37 cron이거나 수동으로 final_run을 선택한 경우 true
           IS_FINAL_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '37 14 * * *' && 'true' || inputs.is_final_run || 'false' }}
@@ -71,6 +69,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "no changes, skipping commit"
           else
-            git commit -m "chore: update canvas mirror (docs) + state [skip ci]"
+            git commit -m "chore: update page (docs) + state [skip ci]"
             git push
           fi
